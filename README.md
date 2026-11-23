@@ -6,7 +6,7 @@ SovereignGate is planned as an open-source Python library and LiteLLM custom gua
 
 SovereignGate provides **configurable data-minimization and technical safeguard controls (supporting GDPR Art. 5(1)(c) & Art. 32)**. It is not a compliance product or legal advice.
 
-> **Project status:** Implementation is underway. The installable Python package currently has its project/quality scaffold and a `sovereigngate --version` command; the policy engine, detectors, normalizer, ONNX NER, and processing pipeline are still being implemented. Other CLI commands and deployment examples below describe planned V1 behavior, not available features. See the [V1 task plan](./docs/TASKS.md) for implementation status.
+> **Project status:** Implementation is underway. The installable Python package, policy loader, normalizer, Tier 1 detectors, and local ONNX NER runner are implemented. The span/policy pipeline, HMAC vault, LiteLLM adapter, audit log, and functional CLI commands remain in progress. NER weights are not bundled, and language support is not claimed until benchmarked. See the [V1 task plan](./docs/TASKS.md) for implementation status.
 
 ## Why it exists
 
@@ -19,7 +19,7 @@ SovereignGate is designed to run inside the customer's existing LiteLLM deployme
 - **Detect structured identifiers locally.** Use structural boundaries and check-digit validation for supported EU national identifiers, IBANs, payment cards, and related categories. The initial country priority includes Poland, Spain, France, Germany, Italy, the Netherlands, Sweden, and Belgium, followed by identifiers supported by verified validators. The exact supported matrix must be documented; “EU-27 target” does not imply every national identifier is already supported.
 - **Detect common contact and secret patterns.** The planned Tier 1 set includes emails, phone numbers, IP addresses, and selected API-key/bearer-token formats.
 - **Normalize obfuscated text before scanning.** Apply Unicode NFKC normalization, remove specified zero-width characters, and handle separator obfuscation while keeping offsets so detections can be replaced in the original text.
-- **Optionally detect unstructured entities.** An opt-in CPU-based ONNX NER tier is planned for person, organization, address, and health-related terms in supported languages. It is disabled by default and is intended to load a locally provisioned model artifact; it will not download models at request time.
+- **Optionally detect unstructured entities.** An opt-in CPU-based ONNX runner for person, organization, address, and health-related spans is implemented. It requires a locally provisioned, hash-verified model/tokenizer bundle, is disabled by default, and has no runtime model downloads or PyTorch dependency. Target languages remain unvalidated until the benchmark gates pass.
 - **Pseudonymize consistently within a session.** Use HMAC-derived placeholders such as `[PL_PESEL_9F2A1C]` so repeated canonical values in the same session can map to the same token. The lookup needed to restore a value is kept only in a request-scoped in-memory vault.
 - **Integrate with LiteLLM request/response paths.** Inspect supported message text, tool-call argument JSON, and tool outputs; handle streaming placeholders split across chunks; attach non-PII entity/routing metadata; and apply configured actions.
 - **Support observe-first operation.** `shadow` mode is intended to report findings without changing or blocking a request. `enforce` mode is intended to apply per-entity `mask`, `block`, `shadow_log`, or `allow` policy actions.

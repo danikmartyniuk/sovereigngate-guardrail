@@ -84,12 +84,13 @@ class NerConfig(BaseModel):
 
     enabled: bool = False
     model_dir: Path | None = None
-    artifact_sha256: Annotated[str, StringConstraints(pattern=_SHA256_PATTERN)] | None = None
+    manifest_sha256: Annotated[str, StringConstraints(pattern=_SHA256_PATTERN)] | None = None
+    threshold: float = Field(default=0.5, ge=0.0, le=1.0)
     languages: tuple[str, ...] = ()
 
     @model_validator(mode="after")
     def require_local_model_when_enabled(self) -> Self:
-        if self.enabled and (self.model_dir is None or self.artifact_sha256 is None):
+        if self.enabled and (self.model_dir is None or self.manifest_sha256 is None):
             raise ValueError("Enabled NER requires a local model directory and SHA-256 digest")
         return self
 

@@ -26,6 +26,7 @@ ner = [
 ]
 dev = [
     "mypy>=1.13.0",
+    "onnx>=1.16.0",
     "pip-audit>=2.7.0",
     "presidio-analyzer==2.2.366",
     "pytest>=8.0.0",
