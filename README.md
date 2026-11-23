@@ -6,26 +6,95 @@ SovereignGate is an open-source Python library and LiteLLM custom guardrail for 
 
 SovereignGate provides **configurable data-minimization and technical safeguard controls (supporting GDPR Art. 5(1)(c) & Art. 32)**. It is not a compliance product or legal advice.
 
-> **Project status:** Implementation is underway. The installable Python package, policy loader, normalizer, Tier 1 detectors, local ONNX NER runner, span/policy decision pipeline, HMAC vault, bounded streaming placeholder buffer, LiteLLM lifecycle adapter, SQLite WAL audit writer/verifier, offline `verify-log`/`export-dpia`/`dry-run`/`benchmark` commands, and zero-leak regressions are implemented. The adapter copies and masks supported request text, restores only at configured trusted boundaries, enqueues PII-free pre-call records, and wipes request vaults on terminal paths. The reference benchmark and pilot deployment remain in progress. NER weights are not bundled, and language support is not claimed until benchmarked. See the [V1 task plan](./docs/TASKS.md) for implementation status.
+> **Project status:** Implementation is underway. The installable Python package, policy loader, normalizer, Tier 1 detectors, local ONNX NER runner, span/policy decision pipeline, HMAC vault, bounded streaming placeholder buffer, LiteLLM lifecycle adapter, SQLite WAL audit writer/verifier, offline CLI, synthetic benchmark harness, and zero-leak regressions are implemented. The reference-environment benchmark and live pilot deployment remain unverified. NER weights are not bundled, and language support is not claimed until benchmarked. See the [V1 task plan](./docs/TASKS.md) for current gates.
 
 ## Why it exists
 
 Applications often send user text through an AI gateway to a model provider. That text can contain identifiers and other sensitive values that the application does not want to disclose to the provider. A gateway guardrail can reduce the data sent by replacing selected values with stable, opaque placeholders while preserving enough context for the model to do its work.
 
-SovereignGate is designed to run inside the customer's existing LiteLLM deployment. Its detection, pseudonymization, and audit components are intended to run locally; it does not add a hosted SaaS dependency or make network calls from the engine/evidence hot path. LiteLLM still makes its normal request to whichever model provider the customer has configured.
+SovereignGate runs inside the customer's existing LiteLLM deployment. Its detection, pseudonymization, and audit components run locally; it does not add a hosted SaaS dependency or make network calls from the engine/evidence hot path. LiteLLM still makes its normal request to whichever model provider the customer has configured.
 
-## What V1 is designed to do
+## Installation and first run
 
-- **Detect structured identifiers locally.** Use structural boundaries and check-digit validation for supported EU national identifiers, IBANs, payment cards, and related categories. The initial country priority includes Poland, Spain, France, Germany, Italy, the Netherlands, Sweden, and Belgium, followed by identifiers supported by verified validators. The exact supported matrix must be documented; “EU-27 target” does not imply every national identifier is already supported.
-- **Detect common contact and secret patterns.** The planned Tier 1 set includes emails, phone numbers, IP addresses, and selected API-key/bearer-token formats.
+The package currently installs from a source checkout (a PyPI release is not yet available). Use Python 3.12 or newer:
+
+```bash
+git clone https://github.com/danikmartyniuk/sovereigngate-guardrail.git
+cd sovereigngate-guardrail
+python3.12 -m venv .venv
+```
+
+Activate the environment (`source .venv/bin/activate` on macOS/Linux, or `.venv\Scripts\activate` in Windows PowerShell), then install:
+
+```bash
+python -m pip install --upgrade pip
+python -m pip install -e .
+sovereigngate --version
+```
+
+Optional extras:
+
+```bash
+python -m pip install -e ".[ner]"  # ONNX Runtime, Tokenizers, and NumPy for local Tier 2 inference
+python -m pip install -e ".[dev]"  # tests, lint/type tools, and Presidio benchmark baseline
+```
+
+Installing the `ner` extra does not download model weights. Tier 2 remains disabled unless a locally provisioned, digest-verified bundle is configured.
+The Presidio baseline in the `dev` extra also requires a pre-provisioned local `en_core_web_lg==3.8.0` model matching the pinned digest in [T04](./docs/ARCHITECTURE.md#t04--benchmark-protocol-resolved); the benchmark runner never downloads it.
+
+To run the local quality checks from the source checkout:
+
+```bash
+pytest -v
+ruff check src tests benchmarks deploy
+mypy src
+pip-audit
+```
+
+The [GitHub Actions workflow](./.github/workflows/ci.yml) runs tests with coverage reporting, Ruff, mypy, and dependency auditing. The reference-environment benchmark and full release coverage gate are separate release checks.
+
+## Configuration
+
+Production requires a stable `SOVEREIGNGATE_HMAC_SECRET` of at least 32 bytes, represented as hex or base64. Generate a development secret with:
+
+```bash
+python -c 'import secrets; print(secrets.token_hex(32))'
+```
+
+Store the result in your secret manager or local `.env`; do not commit it. The development-only `SOVEREIGNGATE_ENV=development` fallback creates an ephemeral key and is not appropriate for stable production tokens. `SOVEREIGNGATE_POLICY_PATH` selects the YAML policy (default: `rules/eu_default_v1.yaml` from the source tree), and `SOVEREIGNGATE_AUDIT_DB` selects the local SQLite audit path when the adapter creates its own writer.
+
+The default policy is `shadow`: findings are observed and audited without changing payloads. Shadow mode may still send original content to the configured provider. To test enforcement, create a policy file and point `SOVEREIGNGATE_POLICY_PATH` to it; for example, this deliberately narrow test policy masks only valid PESEL values:
+
+```yaml
+mode: enforce
+on_error: fail_closed
+entities:
+  PL_PESEL:
+    enabled: true
+    action: mask
+    sensitivity: standard
+```
+
+Only configured, enabled entities receive the listed action. Unsupported, disabled, or undetected data may still reach the provider.
+
+## LiteLLM proxy usage
+
+The V2 custom-guardrail configuration is in [`deploy/litellm_config.yaml`](./deploy/litellm_config.yaml). It loads `SovereignGateGuardrail` for pre-call and post-call hooks, enables PII-free audit admission, and leaves `trusted_routes` and `internal_tools` empty. Consequently, assistant text and tool arguments are not rehydrated by default. Add allowlists only for routes/tools explicitly trusted to receive original values.
+
+For the local Compose stack, follow [`deploy/README.md`](./deploy/README.md). It requires operator-provided LiteLLM master, provider, and HMAC secrets. The stack starts in shadow mode. To exercise `enforce`, mount or copy an operator-reviewed enforcement policy into the image and set `SOVEREIGNGATE_POLICY_PATH` to its container path. The sample model points to OpenAI; this is an ordinary provider request and does not establish EU data residency.
+
+## What V1 currently supports
+
+- **Detect structured identifiers locally.** Tier 1 uses structural boundaries and check-digit validation for configured EU national identifiers, EU IBANs, payment cards, and related categories. The tested candidate matrix covers 23 national-ID modules; CY, LV, LU, and MT personal-ID formats remain unsupported by the pinned `python-stdnum` baseline. See the [country matrix](./docs/ARCHITECTURE.md#t03--identifier-matrix-and-local-ner-artifact-resolved). “EU-27 target” does not mean every national identifier is supported.
+- **Detect common contact and secret patterns.** Tier 1 includes email, phone, IP address, and selected API-key/bearer-token detection.
 - **Normalize obfuscated text before scanning.** Apply Unicode NFKC normalization, remove specified zero-width characters, and handle separator obfuscation while keeping offsets so detections can be replaced in the original text.
 - **Optionally detect unstructured entities.** An opt-in CPU-based ONNX runner for person, organization, address, and health-related spans is implemented. It requires a locally provisioned, hash-verified model/tokenizer bundle, is disabled by default, and has no runtime model downloads or PyTorch dependency. Target languages remain unvalidated until the benchmark gates pass.
 - **Pseudonymize consistently within a session.** Use HMAC-derived placeholders such as `[PL_PESEL_9F2A1C]` so repeated canonical values in the same session can map to the same token. The lookup needed to restore a value is kept only in a request-scoped in-memory vault.
-- **Integrate with LiteLLM request/response paths.** Inspect supported message text, tool-call argument JSON, and tool outputs; handle streaming placeholders split across chunks; attach non-PII entity/routing metadata; and apply configured actions.
-- **Support observe-first operation.** `shadow` mode is intended to report findings without changing or blocking a request. `enforce` mode is intended to apply per-entity `mask`, `block`, `shadow_log`, or `allow` policy actions.
-- **Create local evidence.** A background writer persists sanitized event metadata in a local SQLite hash chain. The `verify-log`, `dry-run`, and `export-dpia` commands verify, evaluate, and export sanitized evidence offline.
+- **Integrate with LiteLLM request/response paths.** The adapter scans supported message text, text blocks, tool-call JSON argument values, tool outputs, and text `prompt`/`input` fields; it handles split streaming placeholders and adds non-PII routing metadata.
+- **Support observe-first operation.** `shadow` mode reports findings without changing or blocking on policy results. `enforce` mode applies per-entity `mask`, `block`, `shadow_log`, or `allow` actions and follows the configured error policy.
+- **Create local evidence.** A bounded background writer persists validated, sanitized event metadata in a local SQLite hash chain. The `verify-log`, `dry-run`, and `export-dpia` commands verify, evaluate, and export evidence offline.
 
-## How a request is intended to flow
+## How a request flows
 
 1. LiteLLM invokes the SovereignGate pre-call hook.
 2. The adapter copies the request structure and scans supported text fields. It does not inspect image pixels or arbitrary binary data.
@@ -33,7 +102,7 @@ SovereignGate is designed to run inside the customer's existing LiteLLM deployme
 4. The policy engine resolves overlaps (Tier 1 checksum-validated matches take precedence) and decides which configured entities to mask, block, log in shadow, or allow.
 5. In enforce mode, masked text and per-session HMAC placeholders are passed to the configured model provider. The original values remain in the request's in-memory vault for permitted restoration.
 6. Post-call or streaming hooks can restore only placeholders mapped in that request's vault. Restoration should be limited to a boundary trusted to receive the original value, such as an authorized internal tool. Rehydrating assistant output can expose the original value to the calling application.
-7. Sanitized audit metadata is queued for local persistence. The vault is wiped/released on success, failure, stream completion, and cancellation.
+7. A sanitized pre-call audit event is admitted non-blockingly to the local writer when auditing is configured. The vault is wiped/released on success, failure, stream completion, and cancellation.
 
 Undetected entities and unsupported payload types may still reach the configured provider. Detection is a data-minimization control, not a guarantee that a prompt contains no personal data.
 
@@ -47,7 +116,7 @@ Restoration is opt-in at construction: `trusted_routes` names routes allowed to 
 
 | Mode | Intended behavior |
 | --- | --- |
-| `shadow` | Detect and report policy findings without changing payloads or blocking because of those findings. |
+| `shadow` | Detect and report findings without changing payload text or blocking on policy results. |
 | `enforce` | Apply configured entity actions before the provider request and restore values only at configured trusted boundaries. |
 
 The default is `shadow`. `on_error` supports `fail_closed` and `fail_open`; in enforce mode, fail-closed behavior stops an outbound request if parsing, normalization, detection, or audit admission fails unexpectedly. Operational failures are explicit and sanitized. The bounded audit queue follows the overflow and writer-failure policy recorded in [T02](./docs/ARCHITECTURE.md#t02--audit-queue-and-writer-failure-policy-resolved).
@@ -76,22 +145,48 @@ The benchmark protocol uses 1,000 generated prompts (`eu-synthetic-v1`, fixed se
 
 The utility figure is a deterministic proxy: compare whether a task answer derived from non-sensitive prompt context remains unchanged after masking. It is not an LLM quality score. The local macOS arm64 diagnostic measured 100% recall, 0% hard-negative FPR, 100% utility retention, and Tier 1 p95 of 0.202458 ms over 10,000 observations; these are not release results. The T04 Ubuntu reference run and optional Tier 2 model evaluation remain pending. Presidio comparisons are `N/A` for the six languages under its default registry. Benchmark reports include the generated dataset annotations, environment, and baseline configuration; comparisons must not promise to beat Presidio on every metric. See the [benchmark protocol](./docs/ARCHITECTURE.md#t04--benchmark-protocol-resolved).
 
-## CLI interface and configuration
-
-The implementation plan includes a Python `>=3.12` package, a Pydantic v2 YAML/environment policy loader, and a `sovereigngate` CLI. Planned environment settings include `SOVEREIGNGATE_POLICY_PATH` and `SOVEREIGNGATE_HMAC_SECRET`. Production deployments should provision a stable secret of at least 32 bytes rather than rely on a development-only ephemeral key.
+## CLI commands
 
 Implemented offline commands:
 
 - `sovereigngate verify-log --db audit.db` — verify the local SQLite hash chain and return a failing exit status on integrity errors.
 - `sovereigngate export-dpia --from YYYY-MM-DD --to YYYY-MM-DD --format md|json` — export a report of configured controls and sanitized audit aggregates.
 - `sovereigngate dry-run --file sample_prompts.jsonl` — evaluate local sample input against a policy without calling a model provider.
-- `sovereigngate benchmark` — run the synthetic benchmark and report accuracy, baseline availability, and measured latency. Use `--skip-latency` only for smoke checks; it is not release evidence.
+- `sovereigngate benchmark` — run the synthetic benchmark and report accuracy, baseline availability, and measured latency. Use `--skip-latency` only for smoke checks; it is not release evidence. `--output report.json` writes a sanitized JSON summary.
+
+`dry-run` accepts one JSON object per line. For example:
+
+```json
+{"messages":[{"role":"user","content":"Please check order 42."}]}
+```
+
+It prints only aggregate entity/action counts and processing errors, never the input text.
 
 The commands run locally and do not call model providers. The reference-environment benchmark and Tier 2 measurement remain release work. For architecture boundaries and remaining decisions, read the [architecture](./docs/ARCHITECTURE.md); for implementation ordering and acceptance criteria, read the [task plan](./docs/TASKS.md).
 
 ## Pilot deployment
 
-A sample LiteLLM configuration and Docker Compose stack are provided in [`deploy/`](./deploy/README.md). The stack starts in `shadow` mode using the default policy, requires operator-provided provider and HMAC secrets, persists audit data in a local volume, and mounts NER artifacts read-only. Compose syntax and custom-guardrail class loading are tested; a live stack run has not been verified here because the Docker daemon is unavailable. A live completion also needs provider credentials.
+A sample LiteLLM configuration and Docker Compose stack are provided in [`deploy/`](./deploy/README.md). To start it:
+
+```bash
+cp deploy/.env.example .env
+# Edit .env with a LiteLLM master key, provider API key, and stable 64-hex HMAC secret.
+docker compose -f deploy/docker-compose.yml config --quiet
+docker compose -f deploy/docker-compose.yml up --build
+```
+
+The stack listens on port 4000, persists audit data in a local volume, and mounts NER artifacts read-only. The bundled policy starts in `shadow` mode. Shadow mode does not mask or block based on findings and may pass original text to the configured provider; use synthetic examples unless you deliberately select an operator-reviewed `enforce` policy.
+
+For a local request using only a synthetic PESEL test value:
+
+```bash
+curl http://localhost:4000/v1/chat/completions \
+  -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"demo","messages":[{"role":"user","content":"Check synthetic PESEL 00210100004."}]}'
+```
+
+Compose syntax and custom-guardrail class loading are tested; a live stack run has not been verified here because the Docker daemon is unavailable. A live completion also needs provider credentials. See [deploy/README.md](./deploy/README.md) for the audit volume, local NER mount, and shutdown notes.
 
 ## Out of scope for V1
 
