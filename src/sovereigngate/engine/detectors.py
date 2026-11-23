@@ -198,7 +198,7 @@ _EMAIL_PATTERN: Final[re.Pattern[str]] = re.compile(
     r"[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@"
     r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
     r"(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+"
-    r"(?![A-Za-z0-9.-])"
+    r"(?![A-Za-z0-9-]|\.(?=[A-Za-z0-9.-]))"
 )
 _PHONE_PATTERN: Final[re.Pattern[str]] = re.compile(
     r"(?<![A-Za-z0-9])\+?[0-9](?:[0-9 .()/-]{6,20}[0-9])?(?![A-Za-z0-9])"

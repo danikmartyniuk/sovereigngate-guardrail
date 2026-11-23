@@ -1,6 +1,5 @@
 import hmac
 import re
-import unicodedata
 from dataclasses import dataclass
 from typing import Final
 
@@ -9,6 +8,7 @@ from sovereigngate.engine.detectors import (
     DetectorError,
     canonicalize_candidate,
 )
+from sovereigngate.engine.normalizer import normalize_text
 
 _ENTITY_TYPE_PATTERN: Final[re.Pattern[str]] = re.compile(r"[A-Z][A-Z0-9_]{0,22}\Z")
 _TOKEN_PATTERN: Final[re.Pattern[str]] = re.compile(
@@ -36,12 +36,13 @@ def _derive_suffix(secret: bytes, message: str) -> str:
 
 
 def _canonicalize(entity_type: str, value: str) -> str:
+    normalized_value = normalize_text(value).text
     if entity_type in TIER1_ENTITY_TYPES:
         try:
-            return canonicalize_candidate(entity_type, value)
+            return canonicalize_candidate(entity_type, normalized_value)
         except (DetectorError, TypeError, ValueError):
             raise VaultError("Unable to canonicalize entity value") from None
-    canonical = unicodedata.normalize("NFKC", value).strip()
+    canonical = normalized_value.strip()
     if not canonical:
         raise VaultError("Entity value must not be empty")
     return canonical

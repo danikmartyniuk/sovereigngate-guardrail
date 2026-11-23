@@ -51,7 +51,7 @@ mypy src
 pip-audit
 ```
 
-The [GitHub Actions workflow](./.github/workflows/ci.yml) runs tests with coverage reporting, Ruff, mypy, and dependency auditing. The reference-environment benchmark and full release coverage gate are separate release checks.
+The [GitHub Actions workflow](./.github/workflows/ci.yml) runs the deterministic 100-case, user-style adversarial request suite as a dedicated step, then runs the full regression suite with coverage reporting, Ruff, mypy, and dependency auditing. The full-suite run also includes the adversarial cases. The reference-environment benchmark and full release coverage gate are separate release checks.
 
 ## Configuration
 

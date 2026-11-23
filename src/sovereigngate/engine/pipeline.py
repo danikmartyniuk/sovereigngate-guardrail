@@ -155,11 +155,13 @@ def _apply_policy(
     decisions: list[EntityDecision] = []
     blocked_types: set[str] = set()
     eu_sensitive = False
+    enabled_rules = {
+        entity_type: rule for entity_type, rule in policy.entities.items() if rule.enabled
+    }
 
-    for span in resolve_spans(spans):
-        rule = policy.entities.get(span.entity_type)
-        if rule is None or not rule.enabled:
-            continue
+    configured_spans = (span for span in spans if span.entity_type in enabled_rules)
+    for span in resolve_spans(configured_spans):
+        rule = enabled_rules[span.entity_type]
         configured_action = rule.action
         if policy.mode is OperatingMode.SHADOW:
             action = (

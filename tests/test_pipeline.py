@@ -115,6 +115,18 @@ def test_tier1_wins_over_overlapping_tier2_span() -> None:
     assert result.decisions[0].span.tier == 1
 
 
+def test_overlapping_tier1_validators_do_not_hide_the_configured_entity() -> None:
+    policy = PolicyConfig(
+        mode=OperatingMode.ENFORCE,
+        entities={"DK_CPR": EntityRule(action=EntityAction.MASK)},
+    )
+
+    result = run_pipeline("request 0101800000", policy)
+
+    assert result.detected_entity_types == ("DK_CPR",)
+    assert result.spans_to_mask[0].entity_type == "DK_CPR"
+
+
 def test_span_resolution_prefers_longest_same_tier_and_merges_adjacent_same_type() -> None:
     spans = (
         DetectionSpan(0, 2, "PERSON", 0.9, 2),
