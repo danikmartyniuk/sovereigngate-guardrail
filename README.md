@@ -1,0 +1,95 @@
+# SovereignGate Guardrail
+
+**Local text redaction and pseudonymization for LiteLLM-based AI gateways.**
+
+SovereignGate is planned as an open-source Python library and LiteLLM custom guardrail for detecting configured European identifiers and selected personal or sensitive data in text, replacing detected values before a model request, and selectively restoring values at trusted response or tool boundaries. It also plans to produce a local, tamper-evident record of policy actions without storing prompt contents.
+
+SovereignGate provides **configurable data-minimization and technical safeguard controls (supporting GDPR Art. 5(1)(c) & Art. 32)**. It is not a compliance product or legal advice.
+
+> **Project status:** This repository is currently at the requirements and architecture stage. The runtime package, CLI, tests, and deployment examples described below are planned V1 behavior, not currently installable or executable. See the [V1 task plan](./docs/TASKS.md) for implementation status.
+
+## Why it exists
+
+Applications often send user text through an AI gateway to a model provider. That text can contain identifiers and other sensitive values that the application does not want to disclose to the provider. A gateway guardrail can reduce the data sent by replacing selected values with stable, opaque placeholders while preserving enough context for the model to do its work.
+
+SovereignGate is designed to run inside the customer's existing LiteLLM deployment. Its detection, pseudonymization, and audit components are intended to run locally; it does not add a hosted SaaS dependency or make network calls from the engine/evidence hot path. LiteLLM still makes its normal request to whichever model provider the customer has configured.
+
+## What V1 is designed to do
+
+- **Detect structured identifiers locally.** Use structural boundaries and check-digit validation for supported EU national identifiers, IBANs, payment cards, and related categories. The initial country priority includes Poland, Spain, France, Germany, Italy, the Netherlands, Sweden, and Belgium, followed by identifiers supported by verified validators. The exact supported matrix must be documented; “EU-27 target” does not imply every national identifier is already supported.
+- **Detect common contact and secret patterns.** The planned Tier 1 set includes emails, phone numbers, IP addresses, and selected API-key/bearer-token formats.
+- **Normalize obfuscated text before scanning.** Apply Unicode NFKC normalization, remove specified zero-width characters, and handle separator obfuscation while keeping offsets so detections can be replaced in the original text.
+- **Optionally detect unstructured entities.** An opt-in CPU-based ONNX NER tier is planned for person, organization, address, and health-related terms in supported languages. It is disabled by default and is intended to load a locally provisioned model artifact; it will not download models at request time.
+- **Pseudonymize consistently within a session.** Use HMAC-derived placeholders such as `[PL_PESEL_9F2A1C]` so repeated canonical values in the same session can map to the same token. The lookup needed to restore a value is kept only in a request-scoped in-memory vault.
+- **Integrate with LiteLLM request/response paths.** Inspect supported message text, tool-call argument JSON, and tool outputs; handle streaming placeholders split across chunks; attach non-PII entity/routing metadata; and apply configured actions.
+- **Support observe-first operation.** `shadow` mode is intended to report findings without changing or blocking a request. `enforce` mode is intended to apply per-entity `mask`, `block`, `shadow_log`, or `allow` policy actions.
+- **Create local evidence.** A background writer is planned to persist sanitized event metadata in a local SQLite hash chain, with commands to verify the chain, dry-run a policy, and export a technical safeguards report.
+
+## How a request is intended to flow
+
+1. LiteLLM invokes the SovereignGate pre-call hook.
+2. The adapter copies the request structure and scans supported text fields. It does not inspect image pixels or arbitrary binary data.
+3. Text is normalized and scanned by deterministic validators. Optional local NER can add probabilistic spans.
+4. The policy engine resolves overlaps (Tier 1 checksum-validated matches take precedence) and decides which configured entities to mask, block, log in shadow, or allow.
+5. In enforce mode, masked text and per-session HMAC placeholders are passed to the configured model provider. The original values remain in the request's in-memory vault for permitted restoration.
+6. Post-call or streaming hooks can restore only placeholders mapped in that request's vault. Restoration should be limited to a boundary trusted to receive the original value, such as an authorized internal tool. Rehydrating assistant output can expose the original value to the calling application.
+7. Sanitized audit metadata is queued for local persistence. The vault is wiped/released on success, failure, stream completion, and cancellation.
+
+Undetected entities and unsupported payload types may still reach the configured provider. Detection is a data-minimization control, not a guarantee that a prompt contains no personal data.
+
+## Operating modes and failure behavior
+
+| Mode | Intended behavior |
+| --- | --- |
+| `shadow` | Detect and report policy findings without changing payloads or blocking because of those findings. |
+| `enforce` | Apply configured entity actions before the provider request and restore values only at configured trusted boundaries. |
+
+The planned default is `shadow`. `on_error` is intended to support `fail_closed` and `fail_open`; in enforce mode, fail-closed behavior must stop an outbound request if parsing, normalization, or detection fails unexpectedly. Operational failures must be explicit and sanitized. The audit queue's overflow and writer-failure policy is still an open design decision; see [architecture risks](./docs/ARCHITECTURE.md#7-open-risks--decisions-to-resolve-before-external-pilot).
+
+## Privacy and security model
+
+- **Local processing:** Detection, normalization, pseudonymization, and evidence writing are intended to remain local and offline. The configured model provider still receives requests through the existing LiteLLM path.
+- **No raw PII in diagnostics:** Prompts, message bodies, tool arguments, matched values, and vault contents must never appear in logs, exceptions, or audit records.
+- **Request-scoped restoration map:** Raw values are not intended to be persisted in the audit database. The in-memory vault is request-scoped, redacts its string representation, and is wiped/released in lifecycle cleanup. Python cannot guarantee physical erasure of immutable strings from memory; this is best-effort memory hygiene, not cryptographic erasure.
+- **Pseudonyms remain sensitive:** HMAC placeholders are reversible within the request vault and stable tokens can remain linkable across requests in a session. They are pseudonyms, not anonymized data. Protect the HMAC secret as a production secret; an ephemeral development secret will not produce stable tokens after process restart.
+- **Audit-chain limits:** A hash chain can reveal modification of a retained chain, but by itself cannot prove that an entire database or its latest tail was not deleted. Restrict local database access and protect backups.
+- **NER model control:** Any ONNX model must be selected, licensed, provisioned, and versioned by the operator. Runtime downloads are not part of the design.
+- **Regulatory responsibility:** The consuming organization remains responsible for lawful processing, data retention, access control, provider choice, DPIA decisions, and any user-facing AI disclosure. SovereignGate does not provide automatic GDPR or EU AI Act compliance.
+
+## Performance and evaluation targets
+
+The specification sets release targets for a reproducible synthetic 1,000-prompt benchmark, including 20% hard negatives:
+
+| Measure | Target |
+| --- | ---: |
+| Structured EU identifier recall | At least 99.0% |
+| False positive rate on hard negatives | At most 1.0% |
+| Downstream task utility parity | At least 95.0% |
+| Tier 1 latency, p95 on a 4-vCPU reference VM | Under 2.0 ms |
+| Optional Tier 2 CPU NER latency, p95 | Under 65.0 ms |
+
+These are targets to measure, not results already achieved. Benchmark reports should include the dataset generation method, environment, and pinned Microsoft Presidio baseline version; a comparison must not promise to beat the baseline on every metric.
+
+## Planned interface and configuration
+
+The implementation plan includes a Python `>=3.12` package, a Pydantic v2 YAML/environment policy loader, and a `sovereigngate` CLI. Planned environment settings include `SOVEREIGNGATE_POLICY_PATH` and `SOVEREIGNGATE_HMAC_SECRET`. Production deployments should provision a stable secret of at least 32 bytes rather than rely on a development-only ephemeral key.
+
+Planned CLI commands:
+
+- `sovereigngate verify-log --db audit.db` — verify the local SQLite hash chain and return a failing exit status on integrity errors.
+- `sovereigngate export-dpia --from YYYY-MM-DD --to YYYY-MM-DD --format md|json` — export a report of configured controls and sanitized audit aggregates.
+- `sovereigngate dry-run --file sample_prompts.jsonl` — evaluate local sample input against a policy without calling a model provider.
+- `sovereigngate benchmark` — run the synthetic benchmark and report measured accuracy and latency.
+
+These interfaces are part of the target design and are not available in the repository yet. For architecture boundaries and unresolved decisions, read the [architecture](./docs/ARCHITECTURE.md); for implementation ordering and acceptance criteria, read the [task plan](./docs/TASKS.md).
+
+## Out of scope for V1
+
+- A standalone reverse-proxy server replacing LiteLLM.
+- Image OCR or pixel/bounding-box redaction.
+- A hosted dashboard, SaaS control plane, SSO/billing service, or external model API for detection.
+- A claim that all identifiers in every EU member state are covered before each detector has validated fixtures and release evidence.
+
+## License
+
+Apache-2.0. See [`LICENSE`](./LICENSE).
