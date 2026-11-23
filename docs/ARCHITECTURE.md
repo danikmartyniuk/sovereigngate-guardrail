@@ -1,6 +1,6 @@
 # SovereignGate Guardrail — V1 Architecture
 
-**Status:** V1 architecture; Phase 1 policy, normalization, Tier 1 detection, local ONNX runner, and decision pipeline are implemented. T11's HMAC vault and bounded stream buffer are implemented; LiteLLM request integration and evidence remain in the backlog. This document defines the V1 boundaries and design; the implementation plan is in [`TASKS.md`](./TASKS.md).
+**Status:** V1 architecture; Phase 1 policy, normalization, Tier 1 detection, local ONNX runner, and decision pipeline are implemented. Phase 2 T11's HMAC vault/stream buffer and T12's LiteLLM lifecycle adapter are implemented; security regressions and evidence remain in the backlog. This document defines the V1 boundaries and design; the implementation plan is in [`TASKS.md`](./TASKS.md).
 
 SovereignGate provides **configurable data-minimization and technical safeguard controls (supporting GDPR Art. 5(1)(c) & Art. 32)**. It does not determine or certify legal compliance.
 
@@ -61,6 +61,8 @@ The dependency direction is `adapter -> config + engine + evidence interface`; `
 6. **Pseudonymize.** Derive a deterministic session token from the configured HMAC secret, session ID, entity type, and canonical value. Store originals only in a request-scoped in-memory vault for permitted restoration. If there is no conversation session ID, use a per-request UUID; tokens then do not persist across separate requests.
 7. **Handle responses and streams.** Keep request context available from pre-call through post-call/stream completion. Buffer a possible partial placeholder prefix up to the maximum 32-character token length. Restore only tokens present in that request's vault; an unknown syntactically valid token is left unchanged. Rehydration should occur only at a boundary trusted to receive the original value.
 8. **Audit and release.** Produce counts, category/action labels, routing metadata, and timing only. Enqueue the record without waiting for disk I/O. Wipe the vault in `finally`-style cleanup, including stream exhaustion, errors, and cancellation.
+
+The LiteLLM adapter implements `async_pre_call_hook`, `async_post_call_success_hook`, `async_post_call_failure_hook`, and `async_post_call_streaming_iterator_hook`. It copies caller payloads before scanning, parses and reserializes tool-call JSON values, and attaches only non-PII entity/routing metadata. Configure `trusted_routes` and `internal_tools` when constructing `SovereignGateGuardrail`: assistant response text is restored only for a configured route, and tool arguments only for an allowlisted tool. Missing trust configuration leaves placeholders intact. A random request-context identifier is carried in metadata so the in-memory vault can be shared across retries and found by response hooks.
 
 In `enforce` mode, unexpected parsing, normalization, or detector failures follow `on_error`; `fail_closed` must prevent an unmasked outbound request. Error messages and logs identify only safe categories/rule IDs, never payloads, matched values, tool arguments, or vault contents. `shadow` observes and records but must neither alter payloads nor block on policy findings.
 

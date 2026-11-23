@@ -6,7 +6,7 @@ SovereignGate is planned as an open-source Python library and LiteLLM custom gua
 
 SovereignGate provides **configurable data-minimization and technical safeguard controls (supporting GDPR Art. 5(1)(c) & Art. 32)**. It is not a compliance product or legal advice.
 
-> **Project status:** Implementation is underway. The installable Python package, policy loader, normalizer, Tier 1 detectors, local ONNX NER runner, span/policy decision pipeline, HMAC vault, and bounded streaming placeholder buffer are implemented. Request mutation and LiteLLM lifecycle integration, audit logging, and functional CLI commands remain in progress. NER weights are not bundled, and language support is not claimed until benchmarked. See the [V1 task plan](./docs/TASKS.md) for implementation status.
+> **Project status:** Implementation is underway. The installable Python package, policy loader, normalizer, Tier 1 detectors, local ONNX NER runner, span/policy decision pipeline, HMAC vault, bounded streaming placeholder buffer, and LiteLLM lifecycle adapter are implemented. The adapter copies and masks supported request text, restores only at configured trusted boundaries, and wipes request vaults on terminal paths. Audit logging and functional CLI commands remain in progress. NER weights are not bundled, and language support is not claimed until benchmarked. See the [V1 task plan](./docs/TASKS.md) for implementation status.
 
 ## Why it exists
 
@@ -36,6 +36,12 @@ SovereignGate is designed to run inside the customer's existing LiteLLM deployme
 7. Sanitized audit metadata is queued for local persistence. The vault is wiped/released on success, failure, stream completion, and cancellation.
 
 Undetected entities and unsupported payload types may still reach the configured provider. Detection is a data-minimization control, not a guarantee that a prompt contains no personal data.
+
+## LiteLLM adapter and restoration boundaries
+
+`SovereignGateGuardrail` is implemented in [`litellm_guardrail.py`](./src/sovereigngate/adapters/litellm_guardrail.py). It subclasses LiteLLM's `CustomGuardrail`, copies incoming payloads, and implements native pre-call, post-call-success, failure, and streaming-iterator hooks. It scans message content and text blocks, JSON tool-call argument values, tool outputs, and text `prompt`/`input` fields. Malformed tool-call JSON is rejected with a sanitized guardrail error in fail-closed enforce mode; explicit fail-open emits a sanitized processing-error metadata signal.
+
+Restoration is opt-in at construction: `trusted_routes` names routes allowed to receive restored assistant text, and `internal_tools` names tools allowed to receive restored tool-call arguments. The route name is matched against request metadata (`route` or `model_group`) or the model name. If a route or tool is not allowlisted, its output retains placeholders. Provide a stable `SOVEREIGNGATE_HMAC_SECRET` in production; an explicit bytes secret may also be passed when constructing the adapter. Request-context metadata contains only a random identifier and sanitized entity/routing tags.
 
 ## Operating modes and failure behavior
 
