@@ -92,3 +92,9 @@ When asked to implement a task from `docs/TASKS.md`:
 - **DO NOT** introduce heavy frameworks (no Django, Celery, Redis, or PyTorch). Keep runtime dependencies lightweight (`litellm`, `python-stdnum`, `pydantic`, `pyyaml`, `typer`, `rich`, plus optional `onnxruntime`).
 - **DO NOT** use bare `except Exception: pass`. Catch specific exceptions, increment error metrics, and obey `on_error` policy (`fail_closed` vs. `fail_open`).
 - **DO NOT** mutate caller dictionaries in place silently without copying; copy message structures cleanly inside `pre_call` / `post_call` hooks so LiteLLM state remains predictable.
+
+---
+
+## 5. Git instructions
+- **Branching:** Use feature branches for tasks (e.g., `feature/implement-pesel-detector`), and merge into `main` only after passing all tests and code review.
+- **Pushing:** Use `git push --set-upstream origin <branch>` for new branches. Always pull the latest `main` before starting a new feature branch. Never leave your work incompleted, and always commit frequently with clear messages with subsequent pushing.
