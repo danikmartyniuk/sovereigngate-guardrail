@@ -1,7 +1,9 @@
 import copy
+import hashlib
 import json
 import re
 import threading
+import time
 from collections.abc import AsyncGenerator, Mapping
 from dataclasses import dataclass, field
 from typing import Any, Final
@@ -28,6 +30,7 @@ from sovereigngate.engine.vault import (
     StreamRehydrator,
     VaultCollisionError,
 )
+from sovereigngate.evidence.audit_log import AuditAction, AuditEvent, AuditLog
 
 _CONTEXT_METADATA_KEY: Final[str] = "sovereigngate_request_context"
 _CONTEXT_ID_PATTERN: Final[re.Pattern[str]] = re.compile(r"[0-9a-f]{32}\Z")
@@ -48,7 +51,13 @@ class _AdapterBlock(Exception):
 @dataclass(slots=True)
 class _ScanSummary:
     detected_entity_types: set[str] = field(default_factory=set)
+    entity_counts: dict[str, int] = field(default_factory=dict)
     eu_sensitive: bool = False
+    blocked: bool = False
+    masked: bool = False
+    observed: bool = False
+    allowed: bool = False
+    processing_error: bool = False
 
 
 @dataclass(slots=True)
@@ -70,6 +79,7 @@ class SovereignGateGuardrail(CustomGuardrail):
         ner_runner: NERDetector | None = None,
         trusted_routes: frozenset[str] = frozenset(),
         internal_tools: frozenset[str] = frozenset(),
+        audit_log: AuditLog | None = None,
     ) -> None:
         super().__init__(guardrail_name="SovereignGate", turn_off_message_logging=True)
         selected_secret = load_hmac_secret() if hmac_secret is None else hmac_secret
@@ -80,6 +90,11 @@ class SovereignGateGuardrail(CustomGuardrail):
         self._ner_runner = ner_runner
         self._trusted_routes = trusted_routes
         self._internal_tools = internal_tools
+        self._audit_log = audit_log
+        policy_bytes = json.dumps(
+            policy.model_dump(mode="json"), sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
+        self._policy_sha256 = hashlib.sha256(policy_bytes).hexdigest()
         self._contexts: dict[str, _RequestContext] = {}
         self._contexts_lock = threading.Lock()
 
@@ -91,6 +106,7 @@ class SovereignGateGuardrail(CustomGuardrail):
         call_type: Any,
     ) -> dict[str, Any]:
         del user_api_key_dict, cache, call_type
+        started_ns = time.perf_counter_ns()
         original = copy.deepcopy(data)
         working = copy.deepcopy(data)
         metadata_key, metadata = self._metadata_bucket(working)
@@ -98,6 +114,8 @@ class SovereignGateGuardrail(CustomGuardrail):
         metadata[_CONTEXT_METADATA_KEY] = context_id
         summary = _ScanSummary()
         failure: GuardrailRaisedException | None = None
+        result_payload = working
+        action_taken = AuditAction.UNCHANGED
 
         try:
             messages = working.get("messages")
@@ -116,12 +134,16 @@ class SovereignGateGuardrail(CustomGuardrail):
             metadata["eu_sensitive"] = summary.eu_sensitive
             metadata["detected_entity_types"] = sorted(summary.detected_entity_types)
             working[metadata_key] = metadata
-            return working
+            action_taken = self._audit_action(summary)
         except _AdapterBlock as error:
             self._release_context(context_id)
+            summary.blocked = True
+            action_taken = AuditAction.BLOCKED
             failure = self._block_exception(error.safe_message, blocked_content=True)
         except VaultCollisionError:
             self._release_context(context_id)
+            summary.blocked = True
+            action_taken = AuditAction.BLOCKED
             failure = self._block_exception(
                 "SovereignGate blocked a request after an in-request token collision",
                 blocked_content=True,
@@ -129,6 +151,8 @@ class SovereignGateGuardrail(CustomGuardrail):
         except Exception as error:
             code = error.code if isinstance(error, _AdapterFailure) else "processing_failure"
             self._release_context(context_id)
+            summary.processing_error = True
+            action_taken = AuditAction.PROCESSING_ERROR
             if self._fails_closed:
                 failure = self._block_exception(
                     "SovereignGate could not safely process the request", blocked_content=False
@@ -140,10 +164,32 @@ class SovereignGateGuardrail(CustomGuardrail):
                 fallback_metadata["detected_entity_types"] = sorted(summary.detected_entity_types)
                 fallback_metadata["sovereigngate_processing_error"] = code
                 original[fallback_key] = fallback_metadata
-                return original
+                result_payload = original
+
+        if self._audit_log is not None:
+            try:
+                admitted = self._enqueue_audit_event(
+                    data,
+                    context_id,
+                    summary,
+                    action_taken,
+                    (time.perf_counter_ns() - started_ns) / 1_000_000,
+                )
+            except Exception:
+                admitted = False
+                if self._fails_closed and failure is None:
+                    failure = self._block_exception(
+                        "SovereignGate could not queue sanitized audit evidence",
+                        blocked_content=False,
+                    )
+            if not admitted and failure is None:
+                degraded_key, degraded_metadata = self._metadata_bucket(result_payload)
+                degraded_metadata["sovereigngate_audit_degraded"] = True
+                result_payload[degraded_key] = degraded_metadata
         if failure is not None:
+            self._release_context(context_id)
             raise failure
-        return working
+        return result_payload
 
     async def async_post_call_success_hook(
         self,
@@ -449,18 +495,70 @@ class SovereignGateGuardrail(CustomGuardrail):
             raise _AdapterFailure("processing_failure")
         summary.detected_entity_types.update(result.detected_entity_types)
         summary.eu_sensitive = summary.eu_sensitive or result.eu_sensitive
+        for decision in result.decisions:
+            entity_type = decision.span.entity_type
+            summary.entity_counts[entity_type] = summary.entity_counts.get(entity_type, 0) + 1
+            if decision.action.value == "mask":
+                summary.masked = True
+            elif decision.action.value == "block":
+                summary.blocked = True
+            elif decision.action.value == "shadow_log":
+                summary.observed = True
+            elif decision.action.value == "allow":
+                summary.allowed = True
         if result.processing_error is not None:
             raise _AdapterFailure(result.processing_error.value)
         if result.blocked:
+            summary.blocked = True
             raise _AdapterBlock(self._safe_block_message(result))
         if self.policy.mode is OperatingMode.SHADOW:
             return text
-
         for span in sorted(result.spans_to_mask, key=lambda item: item.start, reverse=True):
             original_value = text[span.start : span.end]
             token = context.vault.tokenize(span.entity_type, original_value)
             text = text[: span.start] + token + text[span.end :]
         return text
+
+    @staticmethod
+    def _audit_action(summary: _ScanSummary) -> AuditAction:
+        if summary.blocked:
+            return AuditAction.BLOCKED
+        if summary.processing_error:
+            return AuditAction.PROCESSING_ERROR
+        if summary.masked:
+            return AuditAction.MASKED
+        if summary.observed:
+            return AuditAction.OBSERVED
+        if summary.allowed:
+            return AuditAction.ALLOWED
+        return AuditAction.UNCHANGED
+
+    def _enqueue_audit_event(
+        self,
+        data: Mapping[str, object],
+        request_id: str,
+        summary: _ScanSummary,
+        action_taken: AuditAction,
+        latency_ms: float,
+    ) -> bool:
+        if self._audit_log is None:
+            return True
+        model_target = data.get("model")
+        if not isinstance(model_target, str) or not re.fullmatch(
+            r"[A-Za-z0-9][A-Za-z0-9._:+_-]{0,63}(?:/[A-Za-z0-9][A-Za-z0-9._:+_-]{0,63})?",
+            model_target,
+        ):
+            model_target = None
+        event = AuditEvent(
+            request_id=request_id,
+            mode=self.policy.mode,
+            model_target=model_target,
+            policy_sha256=self._policy_sha256,
+            entities_detected=summary.entity_counts,
+            action_taken=action_taken,
+            latency_ms=latency_ms,
+        )
+        return self._audit_log.enqueue(event, on_error=self.policy.on_error)
 
     @staticmethod
     def _safe_block_message(result: PipelineResult) -> str:

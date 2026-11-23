@@ -4,6 +4,7 @@ import logging
 import random
 import string
 import traceback
+from pathlib import Path
 
 import pytest
 from litellm.exceptions import GuardrailRaisedException
@@ -20,6 +21,7 @@ from sovereigngate.config import (
     PolicyConfig,
     Sensitivity,
 )
+from sovereigngate.evidence.audit_log import AuditLog, read_records
 
 _SECRET = bytes(range(32))
 _SYNTHETIC_PII = "00210100004"
@@ -289,3 +291,35 @@ async def test_explicit_fail_open_surfaces_only_sanitized_failure_metadata(
 
     _assert_no_leak(_SYNTHETIC_PII, caplog, json.dumps(outbound["metadata"]))
     assert outbound["metadata"]["sovereigngate_processing_error"] == "malformed_tool_arguments"
+
+
+@pytest.mark.asyncio
+async def test_persisted_audit_record_contains_only_sanitized_metadata(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    database_path = tmp_path / "audit.db"
+    policy = PolicyConfig(
+        mode=OperatingMode.ENFORCE,
+        entities={"PL_PESEL": EntityRule(action=EntityAction.MASK)},
+    )
+    payload = {
+        "model": "local/test-model",
+        "messages": [{"role": "user", "content": f"Synthetic {_SYNTHETIC_PII}"}],
+    }
+
+    with AuditLog(database_path) as audit_log:
+        guardrail = SovereignGateGuardrail(policy, _SECRET, audit_log=audit_log)
+        with caplog.at_level(logging.DEBUG):
+            outbound = await guardrail.async_pre_call_hook(None, None, payload, "acompletion")
+
+    records = read_records(database_path)
+    _assert_no_leak(
+        _SYNTHETIC_PII,
+        caplog,
+        json.dumps(outbound["metadata"]),
+        records[0].model_dump_json(),
+    )
+    assert records[0].entities_detected == {"PL_PESEL": 1}
+    assert records[0].action_taken == "masked"
+    assert _SYNTHETIC_PII.encode() not in database_path.read_bytes()

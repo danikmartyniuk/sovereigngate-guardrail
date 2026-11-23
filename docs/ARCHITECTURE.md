@@ -1,6 +1,6 @@
 # SovereignGate Guardrail — V1 Architecture
 
-**Status:** V1 architecture; Phase 1 policy, normalization, Tier 1 detection, local ONNX runner, and decision pipeline are implemented. Phase 2 T11's HMAC vault/stream buffer, T12's LiteLLM lifecycle adapter, and T13's current-path leak regressions are implemented. Persistent evidence remains in the backlog; T14 will add audit-record-specific leak assertions. This document defines the V1 boundaries and design; the implementation plan is in [`TASKS.md`](./TASKS.md).
+**Status:** V1 architecture; Phase 1 policy, normalization, Tier 1 detection, local ONNX runner, and decision pipeline are implemented. Phase 2 T11–T13 and Phase 3 T14's PII-free SQLite WAL audit writer/verifier are implemented. The offline CLI, exporter, benchmark, pilot deployment, and V1 release gate remain in the backlog. This document defines the V1 boundaries and design; the implementation plan is in [`TASKS.md`](./TASKS.md).
 
 SovereignGate provides **configurable data-minimization and technical safeguard controls (supporting GDPR Art. 5(1)(c) & Art. 32)**. It does not determine or certify legal compliance.
 
@@ -46,7 +46,7 @@ Canonical Python source layout is `src/sovereigngate/`.
 | `engine/pipeline.py` | Orchestrate normalization, detection, overlap resolution, and policy decisions | LiteLLM request objects, disk I/O |
 | `engine/vault.py` | HMAC token derivation, request-scoped lookup, stream token buffering | Persistent storage, network services |
 | `adapters/litellm_guardrail.py` | Translate LiteLLM payloads to/from engine results; manage request lifecycle | Direct detector implementations |
-| `evidence/audit_log.py` | Validate and enqueue sanitized audit records; background SQLite writer and verifier | Raw message/prompt data, network services |
+| `evidence/audit_log.py` | Validate and enqueue sanitized audit records; background SQLite WAL writer and verifier (implemented in T14) | Raw message/prompt data, network services |
 | `evidence/exporter.py`, `cli.py` | Offline verification, dry-run, and evidence report generation | Prompt content in exported records |
 
 The dependency direction is `adapter -> config + engine + evidence interface`; `engine -> config/domain types`; `evidence` owns its record schema and persistence. The core engine and evidence writer must remain independently testable without importing LiteLLM.

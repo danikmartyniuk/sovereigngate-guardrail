@@ -2,11 +2,11 @@
 
 **Local text redaction and pseudonymization for LiteLLM-based AI gateways.**
 
-SovereignGate is planned as an open-source Python library and LiteLLM custom guardrail for detecting configured European identifiers and selected personal or sensitive data in text, replacing detected values before a model request, and selectively restoring values at trusted response or tool boundaries. It also plans to produce a local, tamper-evident record of policy actions without storing prompt contents.
+SovereignGate is an open-source Python library and LiteLLM custom guardrail for detecting configured European identifiers and selected personal or sensitive data in text, replacing detected values before a model request, and selectively restoring values at trusted response or tool boundaries. Its local audit writer records sanitized policy metadata in a tamper-evident chain without storing prompt contents.
 
 SovereignGate provides **configurable data-minimization and technical safeguard controls (supporting GDPR Art. 5(1)(c) & Art. 32)**. It is not a compliance product or legal advice.
 
-> **Project status:** Implementation is underway. The installable Python package, policy loader, normalizer, Tier 1 detectors, local ONNX NER runner, span/policy decision pipeline, HMAC vault, bounded streaming placeholder buffer, LiteLLM lifecycle adapter, and current-path zero-leak regressions are implemented. The adapter copies and masks supported request text, restores only at configured trusted boundaries, and wipes request vaults on terminal paths. Audit logging and functional CLI commands remain in progress; persistent audit-record leak checks are part of that work. NER weights are not bundled, and language support is not claimed until benchmarked. See the [V1 task plan](./docs/TASKS.md) for implementation status.
+> **Project status:** Implementation is underway. The installable Python package, policy loader, normalizer, Tier 1 detectors, local ONNX NER runner, span/policy decision pipeline, HMAC vault, bounded streaming placeholder buffer, LiteLLM lifecycle adapter, SQLite WAL audit writer/verifier, and zero-leak regressions are implemented. The adapter copies and masks supported request text, restores only at configured trusted boundaries, enqueues PII-free pre-call records, and wipes request vaults on terminal paths. Functional CLI commands, the reproducible benchmark, and pilot deployment remain in progress. NER weights are not bundled, and language support is not claimed until benchmarked. See the [V1 task plan](./docs/TASKS.md) for implementation status.
 
 ## Why it exists
 
@@ -23,7 +23,7 @@ SovereignGate is designed to run inside the customer's existing LiteLLM deployme
 - **Pseudonymize consistently within a session.** Use HMAC-derived placeholders such as `[PL_PESEL_9F2A1C]` so repeated canonical values in the same session can map to the same token. The lookup needed to restore a value is kept only in a request-scoped in-memory vault.
 - **Integrate with LiteLLM request/response paths.** Inspect supported message text, tool-call argument JSON, and tool outputs; handle streaming placeholders split across chunks; attach non-PII entity/routing metadata; and apply configured actions.
 - **Support observe-first operation.** `shadow` mode is intended to report findings without changing or blocking a request. `enforce` mode is intended to apply per-entity `mask`, `block`, `shadow_log`, or `allow` policy actions.
-- **Create local evidence.** A background writer is planned to persist sanitized event metadata in a local SQLite hash chain, with commands to verify the chain, dry-run a policy, and export a technical safeguards report.
+- **Create local evidence.** A background writer persists sanitized event metadata in a local SQLite hash chain. The `verify-log`, `dry-run`, and `export-dpia` commands are still being implemented.
 
 ## How a request is intended to flow
 
@@ -50,13 +50,13 @@ Restoration is opt-in at construction: `trusted_routes` names routes allowed to 
 | `shadow` | Detect and report policy findings without changing payloads or blocking because of those findings. |
 | `enforce` | Apply configured entity actions before the provider request and restore values only at configured trusted boundaries. |
 
-The planned default is `shadow`. `on_error` is intended to support `fail_closed` and `fail_open`; in enforce mode, fail-closed behavior must stop an outbound request if parsing, normalization, or detection fails unexpectedly. Operational failures must be explicit and sanitized. The audit queue's overflow and writer-failure policy is still an open design decision; see [architecture risks](./docs/ARCHITECTURE.md#7-open-risks--decisions-to-resolve-before-external-pilot).
+The default is `shadow`. `on_error` supports `fail_closed` and `fail_open`; in enforce mode, fail-closed behavior stops an outbound request if parsing, normalization, detection, or audit admission fails unexpectedly. Operational failures are explicit and sanitized. The bounded audit queue follows the overflow and writer-failure policy recorded in [T02](./docs/ARCHITECTURE.md#t02--audit-queue-and-writer-failure-policy-resolved).
 
 ## Privacy and security model
 
-- **Local processing:** Detection, normalization, pseudonymization, and evidence writing are intended to remain local and offline. The configured model provider still receives requests through the existing LiteLLM path.
-- **No raw PII in diagnostics:** Prompts, message bodies, tool arguments, matched values, and vault contents must never appear in logs, exceptions, or audit records.
-- **Request-scoped restoration map:** Raw values are not intended to be persisted in the audit database. The in-memory vault is request-scoped, redacts its string representation, and is wiped/released in lifecycle cleanup. Python cannot guarantee physical erasure of immutable strings from memory; this is best-effort memory hygiene, not cryptographic erasure.
+- **Local processing:** Detection, normalization, pseudonymization, and evidence writing remain local and offline. The configured model provider still receives requests through the existing LiteLLM path.
+- **No raw PII in diagnostics:** Prompts, message bodies, tool arguments, matched values, and vault contents never appear in logs, exposed exception messages, or validated audit records.
+- **Request-scoped restoration map:** Raw values are not persisted in the audit database. The in-memory vault is request-scoped, redacts its string representation, and is wiped/released in lifecycle cleanup. Python cannot guarantee physical erasure of immutable string allocations; this is best-effort memory hygiene, not cryptographic erasure.
 - **Pseudonyms remain sensitive:** HMAC placeholders are reversible within the request vault and stable tokens can remain linkable across requests in a session. They are pseudonyms, not anonymized data. Protect the HMAC secret as a production secret; an ephemeral development secret will not produce stable tokens after process restart.
 - **Audit-chain limits:** A hash chain can reveal modification of a retained chain, but by itself cannot prove that an entire database or its latest tail was not deleted. Restrict local database access and protect backups.
 - **NER model control:** Any ONNX model must be selected, licensed, provisioned, and versioned by the operator. Runtime downloads are not part of the design.

@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 import pytest
 from litellm.exceptions import GuardrailRaisedException
@@ -13,6 +14,7 @@ from sovereigngate.config import (
     PolicyConfig,
     Sensitivity,
 )
+from sovereigngate.evidence.audit_log import AuditLog, read_records
 
 _SECRET = bytes(range(32))
 _PESEL = "00210100004"
@@ -252,6 +254,28 @@ async def test_policy_block_is_a_sanitized_litellm_403() -> None:
     assert _PESEL not in str(error.value)
     assert payload["messages"][0]["content"] == _PESEL
     assert guardrail._contexts == {}
+
+
+@pytest.mark.asyncio
+async def test_blocked_pre_call_is_audited_without_persisting_source_text(
+    tmp_path: Path,
+) -> None:
+    policy = PolicyConfig(
+        mode=OperatingMode.ENFORCE,
+        entities={"PL_PESEL": EntityRule(action=EntityAction.BLOCK)},
+    )
+    database_path = tmp_path / "audit.db"
+    payload = {"messages": [{"role": "user", "content": _PESEL}]}
+
+    with AuditLog(database_path) as audit_log:
+        guardrail = SovereignGateGuardrail(policy, _SECRET, audit_log=audit_log)
+        with pytest.raises(GuardrailRaisedException):
+            await guardrail.async_pre_call_hook(None, None, payload, "acompletion")
+
+    records = read_records(database_path)
+    assert records[0].action_taken == "blocked"
+    assert records[0].entities_detected == {"PL_PESEL": 1}
+    assert _PESEL.encode() not in database_path.read_bytes()
 
 
 @pytest.mark.asyncio
