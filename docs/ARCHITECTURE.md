@@ -70,7 +70,9 @@ SQLite in WAL mode is the canonical local audit store. A background writer assig
 
 Hash chaining makes edits and interior deletions detectable when verifying a retained chain. It does not by itself prevent deletion of the entire database or prove that the latest tail was not removed; stronger external anchoring is outside V1. The report/export is evidence of configured technical controls, not a compliance certificate or a complete DPIA.
 
-Queue saturation and writer failure need an explicit operational policy before implementation: request hooks must not wait for disk, and evidence loss must not be silent. The policy should distinguish shadow-mode availability from enforce-mode fail-closed requirements and expose sanitized health/overflow metrics.
+The writer consumes a bounded in-memory queue of at most 10,000 sanitized records. The request hook uses non-blocking admission and creates the audit event from pre-call detection/action metadata before provider dispatch; it never waits for SQLite. If the queue is full or the writer is already unhealthy, `shadow` records a sanitized dropped-event counter and proceeds unchanged. In `enforce`, the behavior follows `on_error`: `fail_closed` blocks before provider dispatch, while explicitly configured `fail_open` proceeds with a degraded-health signal and incremented drop counter. No overflow or writer failure may be silent.
+
+If the writer fails after a request has been dispatched, the call cannot be rolled back; mark the writer unhealthy, count affected queued records as lost, expose sanitized health state, and apply the above policy to subsequent calls. Shutdown stops new admissions and waits up to 10 seconds for the queue to drain. A timeout or writer failure must surface as a sanitized flush error and non-zero process shutdown status. Queue payloads contain only validated bounded audit fields, never prompt or response text.
 
 ## 6. Security and privacy boundaries
 
@@ -90,9 +92,14 @@ Queue saturation and writer failure need an explicit operational policy before i
 - One vault is owned by a logical LiteLLM request context, shared across its internal retries and response/stream hooks, and wiped on success, error, cancellation, or stream termination. A separate request gets a separate vault. Restore only values found in that request's vault and only at the configured trusted boundary.
 - Wiping the request vault prevents a cross-request collision registry. A different value in a later request can therefore produce a token already present in prior conversation history. This residual risk is not solved by T01; written risk-owner acceptance is mandatory before an external pilot. Without acceptance, the pilot is blocked.
 
+### T02 — Audit queue and writer failure policy (resolved)
+
+- Use a bounded in-memory queue with a 10,000-record capacity. Build each sanitized request-decision event before provider dispatch and admit it with non-blocking `put_nowait`; request hooks never wait for disk.
+- On queue saturation or a known unhealthy writer, `shadow` mode increments a dropped-record counter, marks local health degraded, and proceeds without changing or blocking the request. In `enforce`, `on_error: fail_closed` rejects before provider dispatch; an explicit `fail_open` permits forwarding but raises the sanitized health signal and counter. No raw payload data is used in these signals.
+- If a writer fails after dispatch, do not pretend that the request was rolled back: count queued records that cannot be persisted, expose the unhealthy state, and apply the same policy to subsequent requests. Shutdown drains for at most 10 seconds; timeout/failure surfaces as a sanitized flush error and non-zero process exit.
+
 ### Remaining Phase 0 decisions
 
-2. **Audit queue failure:** Specify queue capacity, overflow behavior per mode, operator alerting, flush timeout, and shutdown behavior before implementation.
 3. **EU-27 coverage and NER supply chain:** Maintain a country/identifier matrix tied to the pinned `python-stdnum` version and verified fixtures; select and pin a locally provisioned model and license. No model downloads at runtime.
 4. **Benchmark reproducibility:** Fix the synthetic dataset seed, ground-truth rules, environment, and Presidio version. Define utility scoring and report absolute thresholds separately from baseline comparisons.
 5. **Restoration boundary:** Confirm which LiteLLM response and tool-call paths are trusted to receive original values, including streaming, retries, errors, and cancellation. Rehydrating an assistant response may intentionally expose the original values to the calling application.
