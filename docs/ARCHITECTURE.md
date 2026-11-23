@@ -1,6 +1,6 @@
 # SovereignGate Guardrail — V1 Architecture
 
-**Status:** V1 architecture; package scaffolding is in place and Phase 1 processing modules are in progress. This document defines the V1 boundaries and design; the implementation plan is in [`TASKS.md`](./TASKS.md).
+**Status:** V1 architecture; Phase 1 policy, normalization, Tier 1 detection, local ONNX runner, and decision pipeline are implemented. Request integration, HMAC masking, and evidence remain in the backlog. This document defines the V1 boundaries and design; the implementation plan is in [`TASKS.md`](./TASKS.md).
 
 SovereignGate provides **configurable data-minimization and technical safeguard controls (supporting GDPR Art. 5(1)(c) & Art. 32)**. It does not determine or certify legal compliance.
 

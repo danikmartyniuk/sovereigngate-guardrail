@@ -6,7 +6,7 @@ SovereignGate is planned as an open-source Python library and LiteLLM custom gua
 
 SovereignGate provides **configurable data-minimization and technical safeguard controls (supporting GDPR Art. 5(1)(c) & Art. 32)**. It is not a compliance product or legal advice.
 
-> **Project status:** Implementation is underway. The installable Python package, policy loader, normalizer, Tier 1 detectors, and local ONNX NER runner are implemented. The span/policy pipeline, HMAC vault, LiteLLM adapter, audit log, and functional CLI commands remain in progress. NER weights are not bundled, and language support is not claimed until benchmarked. See the [V1 task plan](./docs/TASKS.md) for implementation status.
+> **Project status:** Implementation is underway. The installable Python package, policy loader, normalizer, Tier 1 detectors, local ONNX NER runner, and span/policy decision pipeline are implemented. The HMAC vault, request mutation, LiteLLM adapter, audit log, and functional CLI commands remain in progress. NER weights are not bundled, and language support is not claimed until benchmarked. See the [V1 task plan](./docs/TASKS.md) for implementation status.
 
 ## Why it exists
 
