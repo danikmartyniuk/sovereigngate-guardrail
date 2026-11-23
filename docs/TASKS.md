@@ -1,12 +1,12 @@
 # V1 Implementation Plan
 
-This is the ordered implementation backlog derived from the product requirements and [`ARCHITECTURE.md`](./ARCHITECTURE.md). **All implementation tasks are currently open**; this repository currently contains product documentation, not a runnable package. Mark a task complete only after its acceptance checks, relevant security regressions, lint, and type checks pass.
+This is the ordered implementation backlog derived from the product requirements and [`ARCHITECTURE.md`](./ARCHITECTURE.md). **All implementation tasks are currently open**; this repository currently contains product documentation, not a runnable package. Phase 0 items are decision tasks and are checked only when the decision is recorded in the architecture. Implementation tasks are checked only after their acceptance checks, relevant security regressions, lint, and type checks pass.
 
 SovereignGate provides **configurable data-minimization and technical safeguard controls (supporting GDPR Art. 5(1)(c) & Art. 32)**; it does not certify compliance.
 
 ## Phase 0 — Resolve pilot-critical decisions
 
-- [ ] **T01 — Resolve token collision and lifecycle policy.** Decide collision behavior for the required six-hex token suffix without silently overwriting a vault entry; document risk acceptance or a revised token length. Specify vault ownership across retries/streams, trusted rehydration boundaries, and cleanup on cancellation. See [architecture risks](./ARCHITECTURE.md#7-open-risks--decisions-to-resolve-before-external-pilot).
+- [x] **T01 — Resolve token collision and lifecycle policy.** Keep the mandated six-hex format; detect different canonical values mapping to the same token within a request vault and fail closed in enforce mode before provider dispatch, never overwriting. One vault belongs to a logical LiteLLM request and is shared across its retries/stream; clear it on every terminal path. The unpreventable cross-request collision risk is a documented pilot gate requiring written owner acceptance. See [T01 decision](./ARCHITECTURE.md#t01--token-collision-and-request-lifecycle-resolved).
 - [ ] **T02 — Define audit writer failure policy.** Specify queue capacity, overflow behavior in `shadow` and `enforce`, sanitized health signaling, flush/shutdown semantics, and what an unavailable audit writer means for enforce-mode requests.
 - [ ] **T03 — Fix supported identifier and NER artifact matrix.** Enumerate each V1 entity/country, `python-stdnum` module or verified validator, normalization/canonicalization rules, valid and invalid fixtures, and unsupported cases. Select and license a local NER artifact, pin its digest, and define provisioning without runtime downloads.
 - [ ] **T04 — Freeze measurable benchmark protocol.** Fix dataset seed and generation rules, ground truth, task-utility scoring, Presidio version, and reference 4-vCPU environment. Separate absolute NFR thresholds from baseline comparisons.

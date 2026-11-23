@@ -81,11 +81,18 @@ Queue saturation and writer failure need an explicit operational policy before i
 - **Audit:** Never persist raw messages, matched values, vault mappings, raw exceptions, or untrusted free-form strings. Keep local database access restricted and backups protected.
 - **Regulatory framing:** SovereignGate supplies configurable technical controls; operators remain responsible for lawful basis, retention, access control, DPIA decisions, provider selection, and user-facing AI disclosure.
 
-## 7. Open risks / decisions to resolve before external pilot
+## 7. Phase 0 decisions and remaining pilot gates
 
-1. **Six-hex token suffix:** The required 6-hex suffix provides only 24 bits and cannot guarantee uniqueness for arbitrary values in one session. Define and test collision detection/handling; obtain explicit risk acceptance or revise the token format before pilot. Never silently overwrite a vault mapping.
-2. **EU-27 coverage evidence:** Maintain a country/identifier matrix tied to actual `python-stdnum` support and verified valid/invalid fixtures. Do not imply every national identifier is implemented merely because EU-27 is the target.
-3. **NER model supply chain:** Select a model/license, pin the artifact digest and tokenizer/config, and document local provisioning. Model download at runtime is prohibited.
-4. **Audit queue failure:** Specify queue capacity, overflow behavior per mode, operator alerting, flush timeout, and shutdown behavior before implementation.
-5. **Restoration boundary:** Confirm which LiteLLM response and tool-call paths are trusted to receive original values, including streaming, retries, errors, and cancellation. Rehydrating an assistant response may intentionally expose the original values to the application caller.
-6. **Benchmark reproducibility:** Fix the synthetic dataset seed, ground-truth rules, environment, and Presidio version. Report absolute release thresholds and baseline comparisons separately.
+### T01 — Token collision and request lifecycle (resolved)
+
+- Preserve the required `[ENTITY_6HEX]` format. The suffix contains only 24 bits, so it is not collision-free; do not imply otherwise or silently generate alternate suffixes, which would break deterministic token compatibility.
+- On vault insertion, compare the canonical value for an existing token. If it differs, raise a sanitized collision error containing only the entity type; in `enforce`, fail closed before provider dispatch. Never overwrite the first mapping. `shadow` mode does not create or use rehydration tokens.
+- One vault is owned by a logical LiteLLM request context, shared across its internal retries and response/stream hooks, and wiped on success, error, cancellation, or stream termination. A separate request gets a separate vault. Restore only values found in that request's vault and only at the configured trusted boundary.
+- Wiping the request vault prevents a cross-request collision registry. A different value in a later request can therefore produce a token already present in prior conversation history. This residual risk is not solved by T01; written risk-owner acceptance is mandatory before an external pilot. Without acceptance, the pilot is blocked.
+
+### Remaining Phase 0 decisions
+
+2. **Audit queue failure:** Specify queue capacity, overflow behavior per mode, operator alerting, flush timeout, and shutdown behavior before implementation.
+3. **EU-27 coverage and NER supply chain:** Maintain a country/identifier matrix tied to the pinned `python-stdnum` version and verified fixtures; select and pin a locally provisioned model and license. No model downloads at runtime.
+4. **Benchmark reproducibility:** Fix the synthetic dataset seed, ground-truth rules, environment, and Presidio version. Define utility scoring and report absolute thresholds separately from baseline comparisons.
+5. **Restoration boundary:** Confirm which LiteLLM response and tool-call paths are trusted to receive original values, including streaming, retries, errors, and cancellation. Rehydrating an assistant response may intentionally expose the original values to the calling application.
