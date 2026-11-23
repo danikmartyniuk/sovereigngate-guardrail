@@ -6,7 +6,7 @@ SovereignGate is an open-source Python library and LiteLLM custom guardrail for 
 
 SovereignGate provides **configurable data-minimization and technical safeguard controls (supporting GDPR Art. 5(1)(c) & Art. 32)**. It is not a compliance product or legal advice.
 
-> **Project status:** Implementation is underway. The installable Python package, policy loader, normalizer, Tier 1 detectors, local ONNX NER runner, span/policy decision pipeline, HMAC vault, bounded streaming placeholder buffer, LiteLLM lifecycle adapter, SQLite WAL audit writer/verifier, offline `verify-log`/`export-dpia`/`dry-run` commands, and zero-leak regressions are implemented. The adapter copies and masks supported request text, restores only at configured trusted boundaries, enqueues PII-free pre-call records, and wipes request vaults on terminal paths. The reproducible benchmark and pilot deployment remain in progress. NER weights are not bundled, and language support is not claimed until benchmarked. See the [V1 task plan](./docs/TASKS.md) for implementation status.
+> **Project status:** Implementation is underway. The installable Python package, policy loader, normalizer, Tier 1 detectors, local ONNX NER runner, span/policy decision pipeline, HMAC vault, bounded streaming placeholder buffer, LiteLLM lifecycle adapter, SQLite WAL audit writer/verifier, offline `verify-log`/`export-dpia`/`dry-run`/`benchmark` commands, and zero-leak regressions are implemented. The adapter copies and masks supported request text, restores only at configured trusted boundaries, enqueues PII-free pre-call records, and wipes request vaults on terminal paths. The reference benchmark and pilot deployment remain in progress. NER weights are not bundled, and language support is not claimed until benchmarked. See the [V1 task plan](./docs/TASKS.md) for implementation status.
 
 ## Why it exists
 
@@ -64,7 +64,7 @@ The default is `shadow`. `on_error` supports `fail_closed` and `fail_open`; in e
 
 ## Performance and evaluation targets
 
-The benchmark protocol uses 1,000 generated prompts (`eu-synthetic-v1`, fixed seed `20261123`) across DE, ES, FR, IT, NL, and PL support, HR, and finance scenarios; 800 contain positive synthetic examples and 200 are hard negatives. The baseline is pinned to [Presidio Analyzer 2.2.366](https://pypi.org/project/presidio-analyzer/2.2.366/).
+The benchmark protocol uses 1,000 generated prompts (`eu-synthetic-v1`, fixed seed `20261123`) across DE, ES, FR, IT, NL, and PL support, HR, and finance scenarios; 800 contain positive synthetic examples and 200 are hard negatives. The baseline is pinned to [Presidio Analyzer 2.2.366](https://pypi.org/project/presidio-analyzer/2.2.366/) with the default `en_core_web_lg==3.8.0` package tree pinned by SHA-256. Reports mark languages unsupported by the default registry as `N/A`.
 
 | Measure | Target |
 | --- | ---: |
@@ -74,7 +74,7 @@ The benchmark protocol uses 1,000 generated prompts (`eu-synthetic-v1`, fixed se
 | Tier 1 latency, p95 on a 4-vCPU reference VM | Under 2.0 ms |
 | Optional Tier 2 CPU NER latency, p95 | Under 65.0 ms |
 
-The utility figure is a deterministic proxy: compare whether a task answer derived from non-sensitive prompt context remains unchanged after masking. It is not an LLM quality score. These are targets to measure, not results already achieved. Benchmark reports should include the generated dataset annotations, environment, and baseline configuration; comparisons must not promise to beat Presidio on every metric. See the [benchmark protocol](./docs/ARCHITECTURE.md#t04--benchmark-protocol-resolved).
+The utility figure is a deterministic proxy: compare whether a task answer derived from non-sensitive prompt context remains unchanged after masking. It is not an LLM quality score. A local macOS arm64 run measured 100% recall, 0% hard-negative FPR, 100% utility retention, and Tier 1 p95 of 0.202458 ms; these are diagnostic, not release results. The T04 Ubuntu reference run and optional Tier 2 model evaluation remain pending. Presidio comparisons are `N/A` for the six languages under its default registry. Benchmark reports include the generated dataset annotations, environment, and baseline configuration; comparisons must not promise to beat Presidio on every metric. See the [benchmark protocol](./docs/ARCHITECTURE.md#t04--benchmark-protocol-resolved).
 
 ## CLI interface and configuration
 
@@ -85,9 +85,9 @@ Implemented offline commands:
 - `sovereigngate verify-log --db audit.db` — verify the local SQLite hash chain and return a failing exit status on integrity errors.
 - `sovereigngate export-dpia --from YYYY-MM-DD --to YYYY-MM-DD --format md|json` — export a report of configured controls and sanitized audit aggregates.
 - `sovereigngate dry-run --file sample_prompts.jsonl` — evaluate local sample input against a policy without calling a model provider.
-- `sovereigngate benchmark` — run the synthetic benchmark and report measured accuracy and latency.
+- `sovereigngate benchmark` — run the synthetic benchmark and report accuracy, baseline availability, and measured latency. Use `--skip-latency` only for smoke checks; it is not release evidence.
 
-The `benchmark` command and reference-environment benchmark run remain release work. The implemented commands above run locally and do not call model providers. For architecture boundaries and remaining decisions, read the [architecture](./docs/ARCHITECTURE.md); for implementation ordering and acceptance criteria, read the [task plan](./docs/TASKS.md).
+The commands run locally and do not call model providers. The reference-environment benchmark and Tier 2 measurement remain release work. For architecture boundaries and remaining decisions, read the [architecture](./docs/ARCHITECTURE.md); for implementation ordering and acceptance criteria, read the [task plan](./docs/TASKS.md).
 
 ## Out of scope for V1
 

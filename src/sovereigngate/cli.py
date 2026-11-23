@@ -8,6 +8,7 @@ from typing import Final, NoReturn
 import typer
 
 from sovereigngate import __version__
+from sovereigngate.benchmark import BenchmarkError, run_benchmark
 from sovereigngate.config import PolicyConfig, PolicyLoadError, load_policy
 from sovereigngate.engine.ner_onnx import NerModelError, NerOnnxRunner
 from sovereigngate.engine.pipeline import PipelineError, run_pipeline
@@ -309,4 +310,64 @@ def dry_run_command(
     }
     typer.echo("Dry-run summary: " + json.dumps(summary, sort_keys=True, separators=(",", ":")))
     if errors:
+        raise typer.Exit(code=1)
+
+
+@app.command("benchmark")
+def benchmark_command(
+    policy_path: Path | None = typer.Option(  # noqa: B008
+        None, "--policy", help="Policy YAML file."
+    ),
+    output: Path | None = typer.Option(  # noqa: B008
+        None, "--output", help="Write sanitized JSON metrics."
+    ),
+    container_image_digest: str | None = typer.Option(  # noqa: B008
+        None,
+        "--container-image-digest",
+        help="Digest of the benchmark container image (sha256:<64 lowercase hex>).",
+    ),
+    skip_presidio: bool = typer.Option(  # noqa: B008
+        False, "--skip-presidio", help="Skip the optional default Presidio baseline."
+    ),
+    skip_latency: bool = typer.Option(  # noqa: B008
+        False, "--skip-latency", help="Skip 100 warm-ups and 10,000 timed observations."
+    ),
+) -> None:
+    policy: PolicyConfig | None = None
+    error_message: str | None = None
+    try:
+        policy = load_policy(policy_path)
+    except PolicyLoadError as error:
+        error_message = f"Policy loading failed: {error}"
+    if error_message is not None or policy is None:
+        _fail(error_message or "Unable to load the configured policy.")
+
+    report = None
+    benchmark_failed = False
+    try:
+        report = run_benchmark(
+            policy,
+            measure_latency=not skip_latency,
+            include_presidio=not skip_presidio,
+            container_image_digest=container_image_digest,
+        )
+    except (BenchmarkError, NerModelError):
+        benchmark_failed = True
+    if benchmark_failed or report is None:
+        _fail("The local synthetic benchmark could not complete.")
+
+    serialized = report.model_dump_json(indent=2)
+    if output is not None:
+        output_error = False
+        try:
+            output.write_text(serialized + "\n", encoding="utf-8")
+        except OSError:
+            output_error = True
+        if output_error:
+            _fail("Unable to write the benchmark report.")
+    typer.echo(serialized if output is None else "Benchmark report written.")
+    if (
+        report.environment.reference_environment_match
+        and report.thresholds.release_gate_passed is not True
+    ):
         raise typer.Exit(code=1)

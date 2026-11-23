@@ -142,3 +142,16 @@ def test_dry_run_malformed_json_is_sanitized_and_nonzero(tmp_path: Path) -> None
     assert result.exit_code == 1
     assert "JSONL line 1 must be a JSON object" in result.output
     assert _PII not in result.output
+
+
+def test_benchmark_command_smoke_reports_fixed_dataset_without_samples() -> None:
+    result = CliRunner().invoke(app, ["benchmark", "--skip-presidio", "--skip-latency"])
+
+    assert result.exit_code == 0, result.output
+    report = json.loads(result.stdout)
+    assert report["benchmark_id"] == "eu-synthetic-v1"
+    assert report["sample_count"] == 1000
+    assert report["positive_samples"] == 800
+    assert report["hard_negative_samples"] == 200
+    assert report["tier1_p95_ms"] is None
+    assert _PII not in result.stdout
