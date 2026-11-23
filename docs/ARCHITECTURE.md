@@ -90,6 +90,7 @@ If the writer fails after a request has been dispatched, the call cannot be roll
 - Preserve the required `[ENTITY_6HEX]` format. The suffix contains only 24 bits, so it is not collision-free; do not imply otherwise or silently generate alternate suffixes, which would break deterministic token compatibility.
 - On vault insertion, compare the canonical value for an existing token. If it differs, raise a sanitized collision error containing only the entity type; in `enforce`, fail closed before provider dispatch. Never overwrite the first mapping. `shadow` mode does not create or use rehydration tokens.
 - One vault is owned by a logical LiteLLM request context, shared across its internal retries and response/stream hooks, and wiped on success, error, cancellation, or stream termination. A separate request gets a separate vault. Restore only values found in that request's vault and only at the configured trusted boundary.
+- Rehydrate tool-call arguments only immediately before dispatch to an explicitly allowlisted internal tool. Rehydrate assistant response text only on a route explicitly marked trusted; if trust is absent, preserve the placeholder. Apply the same rule to streaming, buffering partial tokens up to 32 characters. Tool results sent back to a model pass through pre-call masking again.
 - Wiping the request vault prevents a cross-request collision registry. A different value in a later request can therefore produce a token already present in prior conversation history. This residual risk is not solved by T01; written risk-owner acceptance is mandatory before an external pilot. Without acceptance, the pilot is blocked.
 
 ### T02 — Audit queue and writer failure policy (resolved)
@@ -141,4 +142,3 @@ The model card says “multilingual” but does not substantiate per-language ac
 ### Remaining Phase 0 decisions
 
 4. **Benchmark reproducibility:** Fix the synthetic dataset seed, ground-truth rules, environment, and Presidio version. Define utility scoring and report absolute thresholds separately from baseline comparisons.
-5. **Restoration boundary:** Confirm which LiteLLM response and tool-call paths are trusted to receive original values, including streaming, retries, errors, and cancellation. Rehydrating an assistant response may intentionally expose the original values to the calling application.
