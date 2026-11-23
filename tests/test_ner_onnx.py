@@ -13,6 +13,7 @@ import pytest
 from onnx import TensorProto, helper, numpy_helper
 from tokenizers import Tokenizer, models, pre_tokenizers
 
+import sovereigngate.engine.ner_onnx as ner_module
 from sovereigngate.config import NerConfig
 from sovereigngate.engine.ner_onnx import NerModelError, NerOnnxRunner
 from sovereigngate.engine.normalizer import normalize_text
@@ -362,3 +363,55 @@ def test_runner_rejects_unexpected_onnx_output_shape(tmp_path: Path) -> None:
 
     with pytest.raises(NerModelError, match="incompatible span score tensor"):
         runner.detect(normalize_text("Alice met Acme Corp"))
+
+
+def test_runner_handles_empty_text_and_invalid_local_asset_paths(tmp_path: Path) -> None:
+    manifest_bytes = _model_bundle(tmp_path)
+    runner = _runner(tmp_path, manifest_bytes)
+    assert runner.detect(normalize_text("")) == ()
+
+    outside_file = tmp_path / "outside.onnx"
+    outside_file.write_bytes(b"local test")
+    model_dir = tmp_path / "model"
+    model_dir.mkdir()
+    (model_dir / "linked.onnx").symlink_to(outside_file)
+    with pytest.raises(NerModelError, match="outside its model directory"):
+        ner_module._resolve_asset(model_dir, "linked.onnx")
+
+
+def test_runner_enforces_local_artifact_size_limit(tmp_path: Path) -> None:
+    artifact = tmp_path / "large.bin"
+    artifact.write_bytes(b"too large")
+
+    with pytest.raises(NerModelError, match="exceeds its size limit"):
+        ner_module._sha256_file(artifact, maximum_size=2)
+    with pytest.raises(NerModelError, match="Unable to read"):
+        ner_module._sha256_file(tmp_path / "missing.bin", maximum_size=32)
+
+
+def test_runner_sanitizes_custom_factory_failures(tmp_path: Path) -> None:
+    manifest_bytes = _model_bundle(tmp_path)
+
+    def fail_session(_path: Path) -> _FakeSession:
+        raise RuntimeError("synthetic local model failure")
+
+    with pytest.raises(NerModelError, match="Unable to initialize") as session_error:
+        NerOnnxRunner.load(
+            tmp_path,
+            expected_manifest_sha256=hashlib.sha256(manifest_bytes).hexdigest(),
+            session_factory=fail_session,
+            tokenizer_factory=lambda _: _FakeTokenizer(),
+        )
+    assert "synthetic local model failure" not in str(session_error.value)
+
+    def fail_tokenizer(_path: Path) -> _FakeTokenizer:
+        raise RuntimeError("synthetic local tokenizer failure")
+
+    with pytest.raises(NerModelError, match="Unable to load") as tokenizer_error:
+        NerOnnxRunner.load(
+            tmp_path,
+            expected_manifest_sha256=hashlib.sha256(manifest_bytes).hexdigest(),
+            session_factory=lambda _: _FakeSession(),
+            tokenizer_factory=fail_tokenizer,
+        )
+    assert "synthetic local tokenizer failure" not in str(tokenizer_error.value)

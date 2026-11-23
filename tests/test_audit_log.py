@@ -18,8 +18,10 @@ from sovereigngate.evidence.audit_log import (
     AuditFlushError,
     AuditIntegrityError,
     AuditLog,
+    AuditStartupError,
     canonical_json,
     read_records,
+    record_hash,
     verify_log,
 )
 
@@ -80,6 +82,131 @@ def test_audit_events_reject_prompt_fields_and_unbounded_values() -> None:
         )
 
     assert "synthetic-private-value" not in str(error.value)
+
+
+def test_audit_schema_rejects_naive_timestamps_and_unhashed_actor_ids() -> None:
+    base_event = _event(0).model_dump()
+    with pytest.raises(ValidationError):
+        AuditEvent.model_validate(
+            {**base_event, "timestamp_utc": datetime(2026, 11, 23)}
+        )
+    with pytest.raises(ValidationError) as error:
+        AuditEvent.model_validate({**base_event, "actor_id": "Synthetic Person"})
+    assert "Synthetic Person" not in str(error.value)
+
+
+def test_hash_and_verifier_reject_bad_or_missing_audit_data(tmp_path: Path) -> None:
+    with pytest.raises(AuditIntegrityError):
+        record_hash({"prev_hash": "not-a-digest"})
+    with pytest.raises(AuditIntegrityError):
+        verify_log(tmp_path / "missing.db")
+
+    empty_database = tmp_path / "empty.db"
+    with sqlite3.connect(empty_database):
+        pass
+    with pytest.raises(AuditIntegrityError):
+        verify_log(empty_database)
+
+    malformed_database = tmp_path / "malformed.db"
+    with sqlite3.connect(malformed_database) as connection:
+        connection.execute(
+            "CREATE TABLE audit_records "
+            "(seq INTEGER PRIMARY KEY, record_json TEXT NOT NULL, record_hash TEXT NOT NULL)"
+        )
+        connection.execute(
+            "INSERT INTO audit_records (seq, record_json, record_hash) VALUES (1, ?, ?)",
+            ('{"prompt":"synthetic-private-value"}', "0" * 64),
+        )
+    with pytest.raises(AuditIntegrityError) as error:
+        verify_log(malformed_database)
+    assert "synthetic-private-value" not in str(error.value)
+
+
+def test_writer_startup_failure_and_post_close_admission_are_visible(tmp_path: Path) -> None:
+    blocked_parent = tmp_path / "not-a-directory"
+    blocked_parent.write_text("file", encoding="utf-8")
+    with pytest.raises(AuditStartupError):
+        AuditLog(blocked_parent / "audit.db")
+
+    audit_log = AuditLog(tmp_path / "closed.db")
+    audit_log.close()
+    assert audit_log.enqueue(
+        _event(1, mode=OperatingMode.SHADOW), on_error=ErrorPolicy.FAIL_CLOSED
+    ) is False
+    with pytest.raises(AuditAdmissionError):
+        audit_log.enqueue(_event(2), on_error=ErrorPolicy.FAIL_CLOSED)
+    audit_log.close()
+
+
+def test_audit_log_rejects_invalid_queue_configuration(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="capacity"):
+        AuditLog(tmp_path / "bad-capacity.db", queue_capacity=10_001)
+    with pytest.raises(ValueError, match="timeout"):
+        AuditLog(tmp_path / "bad-timeout.db", drain_timeout=0)
+
+
+def test_verifier_rejects_schema_and_hash_mutations_without_echoing_record_data(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "audit.db"
+    _write_three_records(database_path)
+    connection = sqlite3.connect(database_path)
+    record_json, = connection.execute(
+        "SELECT record_json FROM audit_records WHERE seq=2"
+    ).fetchone()
+    record = json.loads(record_json)
+    record["untrusted_prompt"] = "synthetic-private-value"
+    connection.execute(
+        "UPDATE audit_records SET record_json=? WHERE seq=2",
+        (canonical_json(record),),
+    )
+    connection.commit()
+    connection.close()
+
+    with pytest.raises(AuditIntegrityError) as error:
+        verify_log(database_path)
+    assert "synthetic-private-value" not in str(error.value)
+
+
+@pytest.mark.parametrize("corruption", ["invalid_json", "noncanonical_json"])
+def test_verifier_rejects_malformed_and_noncanonical_records(
+    corruption: str,
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "audit.db"
+    _write_three_records(database_path)
+    with sqlite3.connect(database_path) as connection:
+        record_json, = connection.execute(
+            "SELECT record_json FROM audit_records WHERE seq=1"
+        ).fetchone()
+        if corruption == "invalid_json":
+            changed_json = "not valid json"
+        else:
+            changed_json = json.dumps(json.loads(record_json), indent=2)
+        connection.execute(
+            "UPDATE audit_records SET record_json=? WHERE seq=1", (changed_json,)
+        )
+
+    with pytest.raises(AuditIntegrityError):
+        verify_log(database_path)
+
+
+def test_read_records_refuses_an_integrity_failure(tmp_path: Path) -> None:
+    database_path = tmp_path / "audit.db"
+    _write_three_records(database_path)
+    with sqlite3.connect(database_path) as connection:
+        connection.execute("DELETE FROM audit_records WHERE seq=2")
+
+    with pytest.raises(AuditIntegrityError):
+        read_records(database_path)
+
+
+def test_close_timeout_validation_and_owned_writer_idempotence(tmp_path: Path) -> None:
+    audit_log = AuditLog(tmp_path / "audit.db")
+    audit_log.close()
+    audit_log.close()
+    with pytest.raises(ValueError, match="timeout"):
+        audit_log.close(timeout=0)
 
 
 @pytest.mark.parametrize("tampering", ["edited", "reordered", "deleted"])

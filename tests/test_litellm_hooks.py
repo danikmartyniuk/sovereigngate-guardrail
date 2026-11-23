@@ -1,3 +1,4 @@
+import base64
 import json
 from pathlib import Path
 
@@ -16,8 +17,10 @@ from sovereigngate.config import (
     PolicyLoadError,
     Sensitivity,
 )
+from sovereigngate.engine.detectors import DetectionSpan
 from sovereigngate.engine.ner_onnx import NerModelError
-from sovereigngate.evidence.audit_log import AuditLog, read_records
+from sovereigngate.engine.normalizer import NormalizedText
+from sovereigngate.evidence.audit_log import AuditAdmissionError, AuditLog, read_records
 
 _SECRET = bytes(range(32))
 _PESEL = "00210100004"
@@ -31,6 +34,38 @@ class _TextBlock(BaseModel):
 class _Message(BaseModel):
     role: str
     content: list[_TextBlock]
+
+
+class _ToolFunction(BaseModel):
+    name: str
+    arguments: str
+
+
+class _ToolCall(BaseModel):
+    function: _ToolFunction
+
+
+class _AssistantToolMessage(BaseModel):
+    role: str
+    tool_calls: list[_ToolCall]
+
+
+class _ResponseMessage(BaseModel):
+    content: list[_TextBlock]
+    tool_calls: list[_ToolCall]
+
+
+class _ResponseChoice(BaseModel):
+    message: _ResponseMessage
+
+
+class _Response(BaseModel):
+    choices: list[_ResponseChoice]
+
+
+class _NoopNER:
+    def detect(self, _normalized: NormalizedText) -> tuple[DetectionSpan, ...]:
+        return ()
 
 
 def _guardrail(
@@ -112,6 +147,31 @@ async def test_shadow_mode_scans_but_preserves_original_payload() -> None:
 
 
 @pytest.mark.asyncio
+async def test_shadow_mode_scans_malformed_tool_arguments_as_text() -> None:
+    guardrail = _guardrail(
+        PolicyConfig(
+            mode=OperatingMode.SHADOW,
+            entities={"PL_PESEL": EntityRule(action=EntityAction.MASK)},
+        )
+    )
+    arguments = f"reference {_PESEL}"
+    payload = {
+        "messages": [
+            {
+                "role": "assistant",
+                "tool_calls": [{"function": {"name": "lookup", "arguments": arguments}}],
+            }
+        ]
+    }
+
+    result = await guardrail.async_pre_call_hook(None, None, payload, "acompletion")
+
+    assert result["messages"][0]["tool_calls"][0]["function"]["arguments"] == arguments
+    assert result["metadata"]["detected_entity_types"] == ["PL_PESEL"]
+    assert "sovereigngate_processing_error" not in result["metadata"]
+
+
+@pytest.mark.asyncio
 async def test_pre_call_copies_and_masks_pydantic_text_blocks() -> None:
     guardrail = _guardrail()
     message = _Message(role="user", content=[_TextBlock(type="text", text=_PESEL)])
@@ -122,6 +182,30 @@ async def test_pre_call_copies_and_masks_pydantic_text_blocks() -> None:
     assert message.content[0].text == _PESEL
     assert isinstance(result["messages"][0], _Message)
     assert result["messages"][0].content[0].text.startswith("[PL_PESEL_")
+
+
+@pytest.mark.asyncio
+async def test_pre_call_copies_and_masks_pydantic_tool_call_arguments() -> None:
+    guardrail = _guardrail()
+    message = _AssistantToolMessage(
+        role="assistant",
+        tool_calls=[
+            _ToolCall(
+                function=_ToolFunction(
+                    name="lookup",
+                    arguments=json.dumps({"id": _PESEL}),
+                )
+            )
+        ],
+    )
+
+    result = await guardrail.async_pre_call_hook(
+        None, None, {"messages": [message]}, "acompletion"
+    )
+
+    token_args = json.loads(result["messages"][0].tool_calls[0].function.arguments)
+    assert token_args["id"].startswith("[PL_PESEL_")
+    assert json.loads(message.tool_calls[0].function.arguments) == {"id": _PESEL}
 
 
 @pytest.mark.asyncio
@@ -178,6 +262,46 @@ async def test_post_call_restores_only_trusted_text_and_allowlisted_tool_argumen
 
 
 @pytest.mark.asyncio
+async def test_post_call_rehydrates_pydantic_text_blocks_and_tool_models() -> None:
+    guardrail = _guardrail(
+        trusted_routes=frozenset({"trusted-route"}),
+        internal_tools=frozenset({"internal_lookup"}),
+    )
+    request = {
+        "model": "trusted-route",
+        "metadata": {"session_id": "conversation-1"},
+        "messages": [{"role": "user", "content": _PESEL}],
+    }
+    outbound = await guardrail.async_pre_call_hook(None, None, request, "acompletion")
+    token = outbound["messages"][0]["content"]
+    response = _Response(
+        choices=[
+            _ResponseChoice(
+                message=_ResponseMessage(
+                    content=[_TextBlock(type="text", text=f"Found {token}")],
+                    tool_calls=[
+                        _ToolCall(
+                            function=_ToolFunction(
+                                name="internal_lookup",
+                                arguments=json.dumps({"id": token}),
+                            )
+                        )
+                    ],
+                )
+            )
+        ]
+    )
+
+    restored = await guardrail.async_post_call_success_hook(outbound, None, response)
+
+    assert restored.choices[0].message.content[0].text == f"Found {_PESEL}"
+    assert json.loads(restored.choices[0].message.tool_calls[0].function.arguments) == {
+        "id": _PESEL
+    }
+    assert response.choices[0].message.content[0].text == f"Found {token}"
+
+
+@pytest.mark.asyncio
 async def test_retry_reuses_request_vault_and_same_token() -> None:
     guardrail = _guardrail(trusted_routes=frozenset({"trusted-eu"}))
     request = {
@@ -195,6 +319,147 @@ async def test_retry_reuses_request_vault_and_same_token() -> None:
 
     assert retry_attempt["messages"][0]["content"] == token
     assert restored["choices"][0]["message"]["content"] == _PESEL
+    assert guardrail._contexts == {}
+
+
+@pytest.mark.asyncio
+async def test_pre_call_and_response_hooks_use_litellm_metadata_bucket() -> None:
+    guardrail = _guardrail(trusted_routes=frozenset({"trusted-route"}))
+    request = {
+        "model": "trusted-route",
+        "litellm_metadata": {"session_id": "conversation-1"},
+        "messages": [{"role": "user", "content": _PESEL}],
+    }
+    outbound = await guardrail.async_pre_call_hook(None, None, request, "acompletion")
+    token = outbound["messages"][0]["content"]
+
+    response = await guardrail.async_post_call_success_hook(
+        outbound,
+        None,
+        {"choices": [{"message": {"content": token}}]},
+    )
+
+    assert "metadata" not in outbound
+    assert outbound["litellm_metadata"]["detected_entity_types"] == ["PL_PESEL"]
+    assert response["choices"][0]["message"]["content"] == _PESEL
+
+
+@pytest.mark.asyncio
+async def test_post_call_tool_json_errors_follow_enforce_error_policy() -> None:
+    fail_closed = _guardrail(
+        PolicyConfig(
+            mode=OperatingMode.ENFORCE,
+            on_error=ErrorPolicy.FAIL_CLOSED,
+            entities={"PL_PESEL": EntityRule(action=EntityAction.MASK)},
+        ),
+        internal_tools=frozenset({"internal_lookup"}),
+    )
+    fail_open = _guardrail(
+        PolicyConfig(
+            mode=OperatingMode.ENFORCE,
+            on_error=ErrorPolicy.FAIL_OPEN,
+            entities={"PL_PESEL": EntityRule(action=EntityAction.MASK)},
+        ),
+        internal_tools=frozenset({"internal_lookup"}),
+    )
+    request = {
+        "model": "trusted-route",
+        "metadata": {"session_id": "conversation-1"},
+        "messages": [{"role": "user", "content": _PESEL}],
+    }
+    response = {
+        "choices": [
+            {
+                "message": {
+                    "tool_calls": [
+                        {
+                            "function": {
+                                "name": "internal_lookup",
+                                "arguments": f"malformed {_PESEL}",
+                            }
+                        }
+                    ]
+                }
+            }
+        ]
+    }
+    closed_request = await fail_closed.async_pre_call_hook(None, None, request, "acompletion")
+    open_request = await fail_open.async_pre_call_hook(None, None, request, "acompletion")
+
+    with pytest.raises(GuardrailRaisedException) as error:
+        await fail_closed.async_post_call_success_hook(closed_request, None, response)
+    open_response = await fail_open.async_post_call_success_hook(open_request, None, response)
+
+    assert _PESEL not in str(error.value)
+    assert open_response == response
+    assert (
+        open_request["metadata"]["sovereigngate_processing_error"]
+        == "response_processing_failure"
+    )
+    assert fail_closed._contexts == {}
+    assert fail_open._contexts == {}
+
+
+@pytest.mark.asyncio
+async def test_fail_open_stream_transform_error_returns_chunk_with_degraded_signal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    guardrail = _guardrail(
+        PolicyConfig(
+            mode=OperatingMode.ENFORCE,
+            on_error=ErrorPolicy.FAIL_OPEN,
+            entities={"PL_PESEL": EntityRule(action=EntityAction.MASK)},
+        ),
+        trusted_routes=frozenset({"trusted-route"}),
+    )
+    outbound = await guardrail.async_pre_call_hook(
+        None,
+        None,
+        {
+            "model": "trusted-route",
+            "metadata": {"session_id": "conversation-1"},
+            "messages": [{"role": "user", "content": _PESEL}],
+        },
+        "acompletion",
+    )
+    chunk = {"choices": [{"index": 0, "delta": {"content": "safe token text"}}]}
+
+    def fail_transform(_chunk: object, _context: object) -> object:
+        raise RuntimeError(f"synthetic failure {_PESEL}")
+
+    monkeypatch.setattr(guardrail, "_transform_stream_chunk", fail_transform)
+
+    async def source():
+        yield chunk
+
+    results = [
+        result
+        async for result in guardrail.async_post_call_streaming_iterator_hook(
+            None, source(), outbound
+        )
+    ]
+
+    assert results == [chunk]
+    assert outbound["metadata"]["sovereigngate_processing_error"] == "stream_processing_failure"
+    assert guardrail._contexts == {}
+
+
+@pytest.mark.asyncio
+async def test_stream_without_request_context_passes_chunks_through() -> None:
+    guardrail = _guardrail()
+    chunk = {"choices": [{"delta": {"content": "plain text"}}]}
+
+    async def source():
+        yield chunk
+
+    results = [
+        result
+        async for result in guardrail.async_post_call_streaming_iterator_hook(
+            None, source(), {}
+        )
+    ]
+
+    assert results == [chunk]
     assert guardrail._contexts == {}
 
 
@@ -256,6 +521,21 @@ async def test_policy_block_is_a_sanitized_litellm_403() -> None:
     assert "PL_PESEL + special_category" in str(error.value)
     assert _PESEL not in str(error.value)
     assert payload["messages"][0]["content"] == _PESEL
+    assert guardrail._contexts == {}
+
+
+@pytest.mark.asyncio
+async def test_encoded_payload_block_uses_sanitized_entity_label() -> None:
+    guardrail = _guardrail()
+    encoded_blob = base64.b64encode(bytes(range(64))).decode("ascii")
+    payload = {"messages": [{"role": "user", "content": encoded_blob}]}
+
+    with pytest.raises(GuardrailRaisedException) as error:
+        await guardrail.async_pre_call_hook(None, None, payload, "acompletion")
+
+    assert error.value.status_code == 403
+    assert "ENCODED_CONTENT" in str(error.value)
+    assert encoded_blob not in str(error.value)
     assert guardrail._contexts == {}
 
 
@@ -333,6 +613,53 @@ def test_litellm_startup_fails_on_invalid_policy_and_missing_ner_assets(tmp_path
         SovereignGateGuardrail(ner_policy, _SECRET)
 
 
+def test_constructor_rejects_invalid_keys_and_duplicate_audit_configuration(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(ValueError, match="at least 32 bytes"):
+        SovereignGateGuardrail(PolicyConfig(), b"short")
+
+    audit_log = AuditLog(tmp_path / "external.db")
+    with pytest.raises(ValueError, match="either an audit writer"):
+        SovereignGateGuardrail(
+            PolicyConfig(),
+            _SECRET,
+            audit_log=audit_log,
+            audit_db_path=tmp_path / "duplicate.db",
+        )
+    audit_log.close()
+
+
+def test_close_does_not_close_an_injected_audit_writer(tmp_path: Path) -> None:
+    audit_log = AuditLog(tmp_path / "external.db")
+    guardrail = SovereignGateGuardrail(PolicyConfig(), _SECRET, audit_log=audit_log)
+
+    guardrail.close()
+
+    assert audit_log.health.accepting is True
+    audit_log.close()
+
+
+@pytest.mark.asyncio
+async def test_adapter_uses_explicit_local_ner_runner() -> None:
+    policy = PolicyConfig(
+        mode=OperatingMode.ENFORCE,
+        ner=NerConfig(enabled=True, model_dir="/local/model", manifest_sha256="0" * 64),
+        entities={"PL_PESEL": EntityRule(action=EntityAction.MASK)},
+    )
+    guardrail = SovereignGateGuardrail(policy, _SECRET, ner_runner=_NoopNER())
+
+    outbound = await guardrail.async_pre_call_hook(
+        None,
+        None,
+        {"messages": [{"role": "user", "content": "ordinary text"}]},
+        "acompletion",
+    )
+
+    assert outbound["messages"][0]["content"] == "ordinary text"
+    await guardrail.async_post_call_success_hook(outbound, None, {})
+
+
 @pytest.mark.asyncio
 async def test_malformed_tool_json_fails_closed_without_echoing_payload() -> None:
     guardrail = _guardrail()
@@ -382,6 +709,36 @@ async def test_explicit_fail_open_returns_copy_with_sanitized_error_signal() -> 
     assert result is not payload
     assert result["messages"] == payload["messages"]
     assert result["metadata"]["sovereigngate_processing_error"] == "malformed_tool_arguments"
+
+
+@pytest.mark.asyncio
+async def test_malformed_message_shape_fails_closed_and_fail_open() -> None:
+    payload = {"messages": ["synthetic malformed message"]}
+    fail_closed = _guardrail()
+    with pytest.raises(GuardrailRaisedException) as error:
+        await fail_closed.async_pre_call_hook(None, None, payload, "acompletion")
+    assert "synthetic malformed message" not in str(error.value)
+
+    fail_open = _guardrail(
+        PolicyConfig(
+            mode=OperatingMode.ENFORCE,
+            on_error=ErrorPolicy.FAIL_OPEN,
+            entities={"PL_PESEL": EntityRule(action=EntityAction.MASK)},
+        )
+    )
+    returned = await fail_open.async_pre_call_hook(None, None, payload, "acompletion")
+    assert returned["messages"] == payload["messages"]
+    assert returned["metadata"]["sovereigngate_processing_error"] == "malformed_message"
+
+
+@pytest.mark.asyncio
+async def test_post_call_without_request_context_preserves_response() -> None:
+    guardrail = _guardrail()
+    response = {"choices": [{"message": {"content": "unchanged"}}]}
+
+    result = await guardrail.async_post_call_success_hook({}, None, response)
+
+    assert result is response
 
 
 @pytest.mark.asyncio
@@ -512,6 +869,58 @@ async def test_stream_close_and_request_failure_release_vault_context() -> None:
         retry_data, RuntimeError("synthetic provider failure"), None
     )
     assert guardrail._contexts == {}
+
+
+@pytest.mark.asyncio
+async def test_audit_queue_admission_failure_obeys_enforce_policy(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    def reject_admission(*_args: object, **_kwargs: object) -> bool:
+        raise AuditAdmissionError("safe audit admission error")
+
+    fail_closed_log = AuditLog(tmp_path / "closed.db")
+    monkeypatch.setattr(fail_closed_log, "enqueue", reject_admission)
+    fail_closed = SovereignGateGuardrail(
+        PolicyConfig(
+            mode=OperatingMode.ENFORCE,
+            on_error=ErrorPolicy.FAIL_CLOSED,
+            entities={"PL_PESEL": EntityRule(action=EntityAction.MASK)},
+        ),
+        _SECRET,
+        audit_log=fail_closed_log,
+    )
+    with pytest.raises(GuardrailRaisedException) as error:
+        await fail_closed.async_pre_call_hook(
+            None,
+            None,
+            {"messages": [{"role": "user", "content": _PESEL}]},
+            "acompletion",
+        )
+    assert _PESEL not in str(error.value)
+    assert fail_closed._contexts == {}
+    fail_closed_log.close()
+
+    fail_open_log = AuditLog(tmp_path / "open.db")
+    monkeypatch.setattr(fail_open_log, "enqueue", reject_admission)
+    fail_open = SovereignGateGuardrail(
+        PolicyConfig(
+            mode=OperatingMode.ENFORCE,
+            on_error=ErrorPolicy.FAIL_OPEN,
+            entities={"PL_PESEL": EntityRule(action=EntityAction.MASK)},
+        ),
+        _SECRET,
+        audit_log=fail_open_log,
+    )
+    outbound = await fail_open.async_pre_call_hook(
+        None,
+        None,
+        {"messages": [{"role": "user", "content": _PESEL}]},
+        "acompletion",
+    )
+    assert outbound["metadata"]["sovereigngate_audit_degraded"] is True
+    fail_open._release_context(fail_open._context_id(outbound))
+    fail_open_log.close()
 
 
 @pytest.mark.asyncio

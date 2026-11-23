@@ -5,6 +5,7 @@ import pytest
 from sovereigngate.engine.detectors import (
     TIER1_ENTITY_TYPES,
     DetectionSpan,
+    DetectorError,
     canonicalize_candidate,
     detect_tier1,
 )
@@ -91,6 +92,20 @@ def test_structured_validators_detect_and_canonicalize(
 
 def test_national_identifier_canonicalization_uses_validator_compact_form() -> None:
     assert canonicalize_candidate("PL_PESEL", "00 21 01 00 00 4") == "00210100004"
+
+
+def test_contact_canonicalization_and_unsupported_values_fail_safely() -> None:
+    assert canonicalize_candidate("PHONE", "+1 (202) 555-0123") == "+12025550123"
+    assert canonicalize_candidate("IP_ADDRESS", "2001:0db8::1") == "2001:db8::1"
+    invalid_value = "synthetic-invalid-identifier"
+
+    with pytest.raises(DetectorError) as invalid:
+        canonicalize_candidate("PL_PESEL", invalid_value)
+    with pytest.raises(DetectorError) as unsupported:
+        canonicalize_candidate("UNKNOWN_ENTITY", invalid_value)
+
+    assert invalid_value not in str(invalid.value)
+    assert invalid_value not in str(unsupported.value)
 
 
 def test_iban_requires_valid_mod97_and_eu_country() -> None:

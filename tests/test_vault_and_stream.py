@@ -82,6 +82,16 @@ def test_vault_rejects_short_secrets_and_long_entity_tokens() -> None:
         vault.tokenize("A" + "B" * 23, "value")
 
 
+def test_vault_rejects_empty_sessions_and_canonicalizes_unstructured_text() -> None:
+    with pytest.raises(VaultError, match="session identifier"):
+        SessionVault(_SECRET, "")
+
+    vault = SessionVault(_SECRET, "conversation-1")
+    assert vault.tokenize("PERSON", "Ａlice") == vault.tokenize("PERSON", "Alice")
+    with pytest.raises(VaultError, match="empty"):
+        vault.tokenize("PERSON", "  ")
+
+
 def test_stream_rehydrator_handles_every_token_split() -> None:
     vault = SessionVault(_SECRET, "conversation-1")
     token = vault.tokenize("PL_PESEL", "00210100004")
@@ -111,3 +121,6 @@ def test_stream_rehydrator_flushes_non_token_prefix_and_final_partial() -> None:
     partial_stream = StreamRehydrator(SessionVault(_SECRET, "conversation-1"))
     assert partial_stream.feed("text [PL_PESEL_ABC") == "text "
     assert partial_stream.feed("", final=True) == "[PL_PESEL_ABC"
+
+    with pytest.raises(VaultError, match="already finished"):
+        partial_stream.feed("more text")
