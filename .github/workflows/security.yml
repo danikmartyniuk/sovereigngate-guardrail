@@ -40,8 +40,10 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e ".[all,dev,test,typecheck,security,benchmark]"
+      - name: Freeze installed third-party dependencies
+        run: python -m pip freeze --exclude-editable > "$RUNNER_TEMP/security-requirements.txt"
       - name: Audit installed dependencies for known vulnerabilities
-        run: pip-audit --strict --skip-editable
+        run: pip-audit --strict --requirement "$RUNNER_TEMP/security-requirements.txt"
       - name: Audit runtime distribution licenses
         run: |
           python -m venv "$RUNNER_TEMP/runtime-license-env"
