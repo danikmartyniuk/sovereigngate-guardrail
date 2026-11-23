@@ -89,6 +89,10 @@ Implemented offline commands:
 
 The commands run locally and do not call model providers. The reference-environment benchmark and Tier 2 measurement remain release work. For architecture boundaries and remaining decisions, read the [architecture](./docs/ARCHITECTURE.md); for implementation ordering and acceptance criteria, read the [task plan](./docs/TASKS.md).
 
+## Pilot deployment
+
+A sample LiteLLM configuration and Docker Compose stack are provided in [`deploy/`](./deploy/README.md). The stack starts in `shadow` mode using the default policy, requires operator-provided provider and HMAC secrets, persists audit data in a local volume, and mounts NER artifacts read-only. Compose syntax and custom-guardrail class loading are tested; a live stack run has not been verified here because the Docker daemon is unavailable. A live completion also needs provider credentials.
+
 ## Out of scope for V1
 
 - A standalone reverse-proxy server replacing LiteLLM.

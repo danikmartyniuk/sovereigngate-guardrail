@@ -1,0 +1,23 @@
+services:
+  litellm:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    init: true
+    ports:
+      - "4000:4000"
+    environment:
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?Set LITELLM_MASTER_KEY in the local .env file}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:?Set OPENAI_API_KEY in the local .env file}
+      SOVEREIGNGATE_HMAC_SECRET: ${SOVEREIGNGATE_HMAC_SECRET:?Set a stable 32-byte-or-longer hex secret}
+      SOVEREIGNGATE_ENV: production
+      SOVEREIGNGATE_POLICY_PATH: ${SOVEREIGNGATE_POLICY_PATH:-/app/rules/eu_default_v1.yaml}
+      SOVEREIGNGATE_AUDIT_DB: /var/lib/sovereigngate/audit.db
+    volumes:
+      - audit-data:/var/lib/sovereigngate
+      - ./ner-models:/opt/sovereigngate/ner:ro
+    stop_grace_period: 20s
+    restart: unless-stopped
+
+volumes:
+  audit-data:

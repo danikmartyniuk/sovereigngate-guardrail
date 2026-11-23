@@ -1,6 +1,6 @@
 # SovereignGate Guardrail — V1 Architecture
 
-**Status:** V1 architecture; Phase 1 policy, normalization, Tier 1 detection, local ONNX runner, and decision pipeline are implemented. Phase 2 T11–T13, Phase 3 T14's PII-free SQLite WAL audit writer/verifier, T15's offline CLI/evidence exporter, and the T16 benchmark harness are implemented. The reference run and Tier 2 artifact are outstanding; pilot deployment and the V1 release gate remain open. This document defines the V1 boundaries and design; the implementation plan is in [`TASKS.md`](./TASKS.md).
+**Status:** V1 architecture; Phase 1 policy, normalization, Tier 1 detection, local ONNX runner, and decision pipeline are implemented. Phase 2 T11–T13, Phase 3 T14's PII-free SQLite WAL audit writer/verifier, T15's offline CLI/evidence exporter, the T16 benchmark harness, and T17 deployment files are implemented. Reference hardware/model validation, live container E2E, and the V1 release gate remain open. This document defines the V1 boundaries and design; the implementation plan is in [`TASKS.md`](./TASKS.md).
 
 SovereignGate provides **configurable data-minimization and technical safeguard controls (supporting GDPR Art. 5(1)(c) & Art. 32)**. It does not determine or certify legal compliance.
 

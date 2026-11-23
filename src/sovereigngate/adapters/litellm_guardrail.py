@@ -1,11 +1,14 @@
+import atexit
 import copy
 import hashlib
 import json
+import os
 import re
 import threading
 import time
-from collections.abc import AsyncGenerator, Mapping
+from collections.abc import AsyncGenerator, Collection, Mapping
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Final
 from uuid import uuid4
 
@@ -18,7 +21,9 @@ from sovereigngate.config import (
     OperatingMode,
     PolicyConfig,
     load_hmac_secret,
+    load_policy,
 )
+from sovereigngate.engine.ner_onnx import NerOnnxRunner
 from sovereigngate.engine.pipeline import (
     NERDetector,
     PipelineError,
@@ -73,30 +78,74 @@ class SovereignGateGuardrail(CustomGuardrail):
 
     def __init__(
         self,
-        policy: PolicyConfig,
+        policy: PolicyConfig | None = None,
         hmac_secret: bytes | None = None,
         *,
+        guardrail_name: str = "SovereignGate",
+        event_hook: Any = None,
+        default_on: bool = False,
+        policy_path: str | os.PathLike[str] | None = None,
         ner_runner: NERDetector | None = None,
-        trusted_routes: frozenset[str] = frozenset(),
-        internal_tools: frozenset[str] = frozenset(),
+        trusted_routes: Collection[str] = frozenset(),
+        internal_tools: Collection[str] = frozenset(),
         audit_log: AuditLog | None = None,
+        audit_db_path: str | os.PathLike[str] | None = None,
+        **guardrail_options: Any,
     ) -> None:
-        super().__init__(guardrail_name="SovereignGate", turn_off_message_logging=True)
+        super().__init__(
+            guardrail_name=guardrail_name,
+            event_hook=event_hook,
+            default_on=default_on,
+            turn_off_message_logging=True,
+            **guardrail_options,
+        )
         selected_secret = load_hmac_secret() if hmac_secret is None else hmac_secret
         if len(selected_secret) < 32:
             raise ValueError("The HMAC secret must contain at least 32 bytes")
-        self.policy = policy
+        if audit_log is not None and audit_db_path is not None:
+            raise ValueError("Pass either an audit writer or a database path, not both")
+        selected_policy = (
+            load_policy(Path(policy_path) if policy_path is not None else None)
+            if policy is None
+            else policy
+        )
+        selected_ner_runner = (
+            NerOnnxRunner.from_policy(selected_policy.ner)
+            if ner_runner is None
+            else ner_runner
+        )
         self._hmac_secret = bytes(selected_secret)
-        self._ner_runner = ner_runner
-        self._trusted_routes = trusted_routes
-        self._internal_tools = internal_tools
-        self._audit_log = audit_log
+        self.policy = selected_policy
+        self._ner_runner = selected_ner_runner
+        self._trusted_routes = frozenset(trusted_routes)
+        self._internal_tools = frozenset(internal_tools)
+        selected_audit_path = (
+            audit_db_path or os.environ.get("SOVEREIGNGATE_AUDIT_DB") or None
+        )
+        self._owns_audit_log = audit_log is None and selected_audit_path is not None
+        self._audit_log = (
+            AuditLog(Path(selected_audit_path))
+            if self._owns_audit_log and selected_audit_path is not None
+            else audit_log
+        )
+        self._atexit_registered = False
+        if self._owns_audit_log:
+            atexit.register(self.close)
+            self._atexit_registered = True
         policy_bytes = json.dumps(
-            policy.model_dump(mode="json"), sort_keys=True, separators=(",", ":")
+            self.policy.model_dump(mode="json"), sort_keys=True, separators=(",", ":")
         ).encode("utf-8")
         self._policy_sha256 = hashlib.sha256(policy_bytes).hexdigest()
         self._contexts: dict[str, _RequestContext] = {}
         self._contexts_lock = threading.Lock()
+
+    def close(self) -> None:
+        """Flush an adapter-owned audit writer during an orderly proxy shutdown."""
+        if self._owns_audit_log and self._audit_log is not None:
+            self._audit_log.close()
+            if self._atexit_registered:
+                atexit.unregister(self.close)
+                self._atexit_registered = False
 
     async def async_pre_call_hook(
         self,

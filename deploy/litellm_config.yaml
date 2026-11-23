@@ -1,0 +1,15 @@
+model_list:
+  - model_name: demo
+    litellm_params:
+      model: openai/gpt-4o-mini
+      api_key: os.environ/OPENAI_API_KEY
+
+litellm_settings:
+  guardrails:
+    - guardrail_name: sovereigngate
+      litellm_params:
+        guardrail: sovereigngate.adapters.litellm_guardrail.SovereignGateGuardrail
+        mode: [pre_call, post_call]
+        default_on: true
+        trusted_routes: []
+        internal_tools: []

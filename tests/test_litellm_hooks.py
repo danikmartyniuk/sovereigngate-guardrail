@@ -10,10 +10,13 @@ from sovereigngate.config import (
     EntityAction,
     EntityRule,
     ErrorPolicy,
+    NerConfig,
     OperatingMode,
     PolicyConfig,
+    PolicyLoadError,
     Sensitivity,
 )
+from sovereigngate.engine.ner_onnx import NerModelError
 from sovereigngate.evidence.audit_log import AuditLog, read_records
 
 _SECRET = bytes(range(32))
@@ -276,6 +279,58 @@ async def test_blocked_pre_call_is_audited_without_persisting_source_text(
     assert records[0].action_taken == "blocked"
     assert records[0].entities_detected == {"PL_PESEL": 1}
     assert _PESEL.encode() not in database_path.read_bytes()
+
+
+@pytest.mark.asyncio
+async def test_litellm_constructor_options_load_policy_and_flush_owned_audit(
+    tmp_path: Path,
+) -> None:
+    policy_path = tmp_path / "policy.yaml"
+    policy_path.write_text(
+        "mode: enforce\n"
+        "entities:\n"
+        "  PL_PESEL: {enabled: true, action: mask, sensitivity: standard}\n",
+        encoding="utf-8",
+    )
+    audit_path = tmp_path / "owned-audit.db"
+    guardrail = SovereignGateGuardrail(
+        hmac_secret=_SECRET,
+        guardrail_name="sovereigngate-test",
+        event_hook="pre_call",
+        default_on=True,
+        policy_path=policy_path,
+        audit_db_path=audit_path,
+        trusted_routes=["trusted-route"],
+        internal_tools=["lookup"],
+    )
+    result = await guardrail.async_pre_call_hook(
+        None,
+        None,
+        {"model": "test-model", "messages": [{"role": "user", "content": _PESEL}]},
+        "acompletion",
+    )
+    guardrail.close()
+
+    assert guardrail.guardrail_name == "sovereigngate-test"
+    assert guardrail.policy.mode is OperatingMode.ENFORCE
+    assert result["messages"][0]["content"].startswith("[PL_PESEL_")
+    assert read_records(audit_path)[0].action_taken == "masked"
+
+
+def test_litellm_startup_fails_on_invalid_policy_and_missing_ner_assets(tmp_path: Path) -> None:
+    with pytest.raises(PolicyLoadError, match="Unable to read"):
+        SovereignGateGuardrail(
+            hmac_secret=_SECRET,
+            policy_path=tmp_path / "missing-policy.yaml",
+        )
+
+    ner_policy = PolicyConfig(
+        mode=OperatingMode.ENFORCE,
+        ner=NerConfig(enabled=True, model_dir=tmp_path / "missing-model", manifest_sha256="0" * 64),
+        entities={"PL_PESEL": EntityRule(action=EntityAction.MASK)},
+    )
+    with pytest.raises(NerModelError):
+        SovereignGateGuardrail(ner_policy, _SECRET)
 
 
 @pytest.mark.asyncio
