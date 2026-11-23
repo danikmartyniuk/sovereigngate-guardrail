@@ -30,7 +30,7 @@ The four Phase 0 decisions are recorded below. T01's cross-request token-collisi
 
 ## Phase 2 — Pseudonymization and LiteLLM integration
 
-- [ ] **T11 — Implement HMAC token vault and streaming buffer.** Canonicalize values, derive required per-session HMAC tokens, detect token/vault collisions per T01, redact vault `repr`/`str`, implement explicit wipe, and test stable same-session tokens plus split SSE token handling up to 32 characters.
+- [x] **T11 — Implement HMAC token vault and streaming buffer.** Added canonicalized per-session HMAC tokens, collision rejection without overwriting, redacted vault representations, explicit best-effort wipe, and bounded buffering for split/unknown SSE placeholders up to 32 characters. Focused coverage verifies exact HMAC derivation, same-session stability, collisions, wiping, all token split points, and prompt flushing of non-token text. See [`vault.py`](../src/sovereigngate/engine/vault.py) and [`test_vault_and_stream.py`](../tests/test_vault_and_stream.py).
   - Depends on: T01, T06.
 - [ ] **T12 — Implement LiteLLM lifecycle adapter.** Subclass the supported LiteLLM `CustomGuardrail`; implement pre-call, post-call, and streaming hooks; copy caller payloads; traverse content/text blocks, tool-call JSON arguments, and tool outputs; attach only non-PII routing metadata; sanitize block/error messages; ensure request context and vault cleanup on success, exception, cancellation, retry, and stream termination.
   - Depends on: T06, T10, T11.
