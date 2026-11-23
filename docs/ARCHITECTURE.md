@@ -98,8 +98,47 @@ If the writer fails after a request has been dispatched, the call cannot be roll
 - On queue saturation or a known unhealthy writer, `shadow` mode increments a dropped-record counter, marks local health degraded, and proceeds without changing or blocking the request. In `enforce`, `on_error: fail_closed` rejects before provider dispatch; an explicit `fail_open` permits forwarding but raises the sanitized health signal and counter. No raw payload data is used in these signals.
 - If a writer fails after dispatch, do not pretend that the request was rolled back: count queued records that cannot be persisted, expose the unhealthy state, and apply the same policy to subsequent requests. Shutdown drains for at most 10 seconds; timeout/failure surfaces as a sanitized flush error and non-zero process exit.
 
+### T03 — Identifier matrix and local NER artifact (resolved)
+
+The V1 validator baseline is `python-stdnum==2.2`. These are validator candidates, not a claim that detector implementations or fixture suites already exist. A country becomes supported only after positive and invalid-checksum tests pass. Use country-specific structural boundaries before invoking the listed validator.
+
+| EU member state | V1 personal identifier(s) | `python-stdnum` module(s) | Coverage decision |
+| --- | --- | --- | --- |
+| Austria (AT) | VNR/SVNR | `stdnum.at.vnr` | Candidate |
+| Belgium (BE) | National number / SSN (NISS) | `stdnum.be.ssn` | Candidate |
+| Bulgaria (BG) | EGN, PNF | `stdnum.bg.egn`, `stdnum.bg.pnf` | Candidate |
+| Croatia (HR) | OIB | `stdnum.hr.oib` | Candidate |
+| Cyprus (CY) | — | No personal-ID validator in 2.2 | Unsupported in V1 baseline |
+| Czechia (CZ) | Birth number (RC) | `stdnum.cz.rc` | Candidate |
+| Denmark (DK) | CPR | `stdnum.dk.cpr` | Candidate |
+| Estonia (EE) | Personal ID code (IK) | `stdnum.ee.ik` | Candidate |
+| Finland (FI) | HETU | `stdnum.fi.hetu` | Candidate |
+| France (FR) | NIR | `stdnum.fr.nir` | Candidate |
+| Germany (DE) | Steuer-ID | `stdnum.de.idnr` | Candidate; DE social-insurance number has no module in this baseline |
+| Greece (GR) | AMKA | `stdnum.gr.amka` | Candidate |
+| Hungary (HU) | Personal tax identifier (ANUM) | `stdnum.hu.anum` | Candidate |
+| Ireland (IE) | PPSN | `stdnum.ie.pps` | Candidate |
+| Italy (IT) | Codice fiscale | `stdnum.it.codicefiscale` | Candidate |
+| Latvia (LV) | — | No personal-ID validator in 2.2 | Unsupported in V1 baseline |
+| Lithuania (LT) | Asmens kodas | `stdnum.lt.asmens` | Candidate |
+| Luxembourg (LU) | — | No personal-ID validator in 2.2 | Unsupported in V1 baseline |
+| Malta (MT) | — | No personal-ID validator in 2.2 | Unsupported in V1 baseline |
+| Netherlands (NL) | BSN | `stdnum.nl.bsn` | Candidate |
+| Poland (PL) | PESEL, NIP | `stdnum.pl.pesel`, `stdnum.pl.nip` | Candidate |
+| Portugal (PT) | Citizen card, NIF | `stdnum.pt.cc`, `stdnum.pt.nif` | Candidate |
+| Romania (RO) | CNP | `stdnum.ro.cnp` | Candidate |
+| Slovakia (SK) | Birth number (RC) | `stdnum.sk.rc` | Candidate |
+| Slovenia (SI) | EMŠO | `stdnum.si.emso` | Candidate |
+| Spain (ES) | DNI, NIE, NIF | `stdnum.es.dni`, `stdnum.es.nie`, `stdnum.es.nif` | Candidate |
+| Sweden (SE) | Personnummer | `stdnum.se.personnummer` | Candidate |
+
+EU IBAN uses `stdnum.iban`; card candidates use Luhn validation; BIC uses `stdnum.bic`. These are separate from national-ID coverage. Unsupported-country values must not be described as validated national identifiers. The V1 coverage claim is limited to identifiers with passing fixtures, not blanket EU-27 national-ID coverage.
+
+The opt-in NER source is [GLiNER multilingual v2.1](https://huggingface.co/urchade/gliner_multi-v2.1), whose model card declares Apache-2.0. Pin repository revision `443d26d654e0324125a96bebd8e796c14ff2efe6` and source `model.safetensors` SHA-256 `2100142f31627531497850659dcb3821c99d5e71c08a8e01a98e4b11ef32a199` (1,155,830,112 bytes). The upstream [GLiNER license](https://github.com/urchade/GLiNER/blob/beb41b3839267952d0f063c04dd6236e9fd93a38/LICENSE) and [ONNX export procedure](https://github.com/urchade/GLiNER/blob/beb41b3839267952d0f063c04dd6236e9fd93a38/docs/convert_to_onnx.md) are pinned to the same source revision. Export locally with opset 19 and dynamic INT8 quantization; fail the build if a quantized output is not produced. Record the generated ONNX, tokenizer, config, exporter/toolchain versions, and their SHA-256 digests in a local model manifest. Operators provision that verified directory locally; runtime loading is offline with `local_files_only=True`. Do not bundle the 1.15 GB source weights in this repository.
+
+The model card says “multilingual” but does not substantiate per-language accuracy for DE, FR, ES, PL, IT, NL, and EN. Those remain validation targets only; keep NER disabled by default and do not enable a language until its PII-focused fixtures and Tier 2 latency gate pass.
+
 ### Remaining Phase 0 decisions
 
-3. **EU-27 coverage and NER supply chain:** Maintain a country/identifier matrix tied to the pinned `python-stdnum` version and verified fixtures; select and pin a locally provisioned model and license. No model downloads at runtime.
 4. **Benchmark reproducibility:** Fix the synthetic dataset seed, ground-truth rules, environment, and Presidio version. Define utility scoring and report absolute thresholds separately from baseline comparisons.
 5. **Restoration boundary:** Confirm which LiteLLM response and tool-call paths are trusted to receive original values, including streaming, retries, errors, and cancellation. Rehydrating an assistant response may intentionally expose the original values to the calling application.
