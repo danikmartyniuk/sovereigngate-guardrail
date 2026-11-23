@@ -1,2 +1,12 @@
 # Internal product requirements; do not publish.
 /docs/SPEC.md
+
+# Python build and test outputs
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+build/
+dist/
+.coverage
+htmlcov/

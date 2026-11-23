@@ -1,6 +1,6 @@
 # V1 Implementation Plan
 
-This is the ordered implementation backlog derived from the product requirements and [`ARCHITECTURE.md`](./ARCHITECTURE.md). **All implementation tasks are currently open**; this repository currently contains product documentation, not a runnable package. Phase 0 items are decision tasks and are checked only when the decision is recorded in the architecture. Implementation tasks are checked only after their acceptance checks, relevant security regressions, lint, and type checks pass.
+This is the ordered implementation backlog derived from the product requirements and [`ARCHITECTURE.md`](./ARCHITECTURE.md). Phase 0 items are decision tasks and are checked only when the decision is recorded in the architecture. Implementation tasks are checked only after their acceptance checks, relevant security regressions, lint, and type checks pass. The package scaffold is now installable, but V1 processing features remain incomplete.
 
 SovereignGate provides **configurable data-minimization and technical safeguard controls (supporting GDPR Art. 5(1)(c) & Art. 32)**; it does not certify compliance.
 
@@ -15,7 +15,7 @@ The four Phase 0 decisions are recorded below. T01's cross-request token-collisi
 
 ## Phase 1 — Package, policy, and local processing
 
-- [ ] **T05 — Create package and quality baseline.** Establish the `src/sovereigngate/` package, `pyproject.toml` with Python `>=3.12`, runtime/optional/dev extras, test/lint/type-check configuration, and offline CI. Add a minimal import/CLI smoke test. No model or telemetry downloads in CI's request hot path.
+- [x] **T05 — Create package and quality baseline.** Added the `src/sovereigngate/` package and `pyproject.toml` for Python `>=3.12` with runtime/optional/dev extras, pytest/ruff/mypy configuration, CI quality workflow, and a `--version` CLI/import smoke test. CI tests do not download model artifacts or make request-path network calls.
   - Depends on: T01, T02, T03, T04.
 - [ ] **T06 — Implement strict configuration and default policy.** Add frozen Pydantic v2 schemas, YAML/environment loading, `shadow` default, entity actions/sensitivity, `on_error`, secret validation, and a reviewed `rules/eu_default_v1.yaml`. Reject unknown or invalid settings explicitly.
   - Depends on: T05.

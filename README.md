@@ -6,7 +6,7 @@ SovereignGate is planned as an open-source Python library and LiteLLM custom gua
 
 SovereignGate provides **configurable data-minimization and technical safeguard controls (supporting GDPR Art. 5(1)(c) & Art. 32)**. It is not a compliance product or legal advice.
 
-> **Project status:** This repository is currently at the requirements and architecture stage. The runtime package, CLI, tests, and deployment examples described below are planned V1 behavior, not currently installable or executable. See the [V1 task plan](./docs/TASKS.md) for implementation status.
+> **Project status:** Implementation is underway. The installable Python package currently has its project/quality scaffold and a `sovereigngate --version` command; the policy engine, detectors, normalizer, ONNX NER, and processing pipeline are still being implemented. Other CLI commands and deployment examples below describe planned V1 behavior, not available features. See the [V1 task plan](./docs/TASKS.md) for implementation status.
 
 ## Why it exists
 
@@ -81,7 +81,7 @@ Planned CLI commands:
 - `sovereigngate dry-run --file sample_prompts.jsonl` — evaluate local sample input against a policy without calling a model provider.
 - `sovereigngate benchmark` — run the synthetic benchmark and report measured accuracy and latency.
 
-These interfaces are part of the target design and are not available in the repository yet. For architecture boundaries and unresolved decisions, read the [architecture](./docs/ARCHITECTURE.md); for implementation ordering and acceptance criteria, read the [task plan](./docs/TASKS.md).
+The listed functional commands are part of the target design and are not available yet; only `sovereigngate --version` is implemented. For architecture boundaries and remaining decisions, read the [architecture](./docs/ARCHITECTURE.md); for implementation ordering and acceptance criteria, read the [task plan](./docs/TASKS.md).
 
 ## Out of scope for V1
 
