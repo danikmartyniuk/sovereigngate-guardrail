@@ -16,7 +16,23 @@ SovereignGate runs inside the customer's existing LiteLLM deployment. Its detect
 
 ## Installation and first run
 
-The package currently installs from a source checkout (a PyPI release is not yet available). Use Python 3.12 or newer:
+Use Python 3.12 or newer.
+
+### Install from PyPI
+
+The first PyPI release has not been published yet. After a tagged release is available, install the base package or the optional integrations you need:
+
+```bash
+pip install sovereigngate-guardrail
+pip install "sovereigngate-guardrail[litellm]"
+pip install "sovereigngate-guardrail[sidecar]"
+```
+
+The `litellm` extra installs the LiteLLM adapter dependency. The `sidecar` extra installs FastAPI and Uvicorn dependencies for optional sidecar integrations; a standalone proxy is not part of V1. The `ner` extra enables the local ONNX runtime but does not download model weights. Install all three optional integration groups with `pip install "sovereigngate-guardrail[all]"`.
+
+### Install from a source checkout
+
+Until the first release is published, install from the repository:
 
 ```bash
 git clone https://github.com/danikmartyniuk/sovereigngate-guardrail.git
@@ -28,19 +44,17 @@ Activate the environment (`source .venv/bin/activate` on macOS/Linux, or `.venv\
 
 ```bash
 python -m pip install --upgrade pip
-python -m pip install -e .
+python -m pip install -e ".[litellm]"
 sovereigngate --version
 ```
 
-Optional extras:
+For local development and the full test/toolchain set:
 
 ```bash
-python -m pip install -e ".[ner]"  # ONNX Runtime, Tokenizers, and NumPy for local Tier 2 inference
-python -m pip install -e ".[dev]"  # tests, lint/type tools, and Presidio benchmark baseline
+python -m pip install -e ".[dev,test,typecheck,security,benchmark,litellm,ner]"
 ```
 
-Installing the `ner` extra does not download model weights. Tier 2 remains disabled unless a locally provisioned, digest-verified bundle is configured.
-The Presidio baseline in the `dev` extra also requires a pre-provisioned local `en_core_web_lg==3.8.0` model matching the pinned digest in [T04](./docs/ARCHITECTURE.md#t04--benchmark-protocol-resolved); the benchmark runner never downloads it.
+The Presidio benchmark baseline requires a pre-provisioned local `en_core_web_lg==3.8.0` model matching the pinned digest in [T04](./docs/ARCHITECTURE.md#t04--benchmark-protocol-resolved); the benchmark runner never downloads it.
 
 To run the local quality checks from the source checkout:
 
@@ -49,9 +63,11 @@ pytest -v
 ruff check src tests benchmarks deploy
 mypy src
 pip-audit
+python -m build
+twine check dist/*
 ```
 
-The [GitHub Actions workflow](./.github/workflows/ci.yml) runs the deterministic 100-case, user-style adversarial request suite as a dedicated step, then runs the full regression suite with coverage reporting, Ruff, mypy, and dependency auditing. The full-suite run also includes the adversarial cases. The reference-environment benchmark and full release coverage gate are separate release checks.
+The [GitHub Actions workflow](./.github/workflows/ci.yml) runs the deterministic 100-case, user-style adversarial request suite as a dedicated step, then runs the full regression suite with coverage reporting, Ruff, mypy, and dependency auditing. The full-suite run also includes the adversarial cases. The [PyPI publishing workflow](./.github/workflows/publish-pypi.yml) runs tests and builds on manual dispatch but skips publishing; pushing a `v*.*.*` tag triggers the trusted OIDC publish job. The reference-environment benchmark and full release coverage gate are separate release checks.
 
 ## Configuration
 
@@ -194,6 +210,18 @@ Compose syntax and custom-guardrail class loading are tested; a live stack run h
 - Image OCR or pixel/bounding-box redaction.
 - A hosted dashboard, SaaS control plane, SSO/billing service, or external model API for detection.
 - A claim that all identifiers in every EU member state are covered before each detector has validated fixtures and release evidence.
+
+## Maintainer release checklist
+
+1. Configure PyPI Trusted Publishing for this repository, workflow `.github/workflows/publish-pypi.yml`, and GitHub environment `pypi`. No PyPI API token is stored in GitHub secrets.
+2. Confirm the release commit passes CI and verify the distributions locally with `python -m build` and `twine check dist/*`.
+3. Create and push a `vX.Y.Z` tag; the tag is the package version source, so do not edit a version constant in `pyproject.toml`:
+
+   ```bash
+   git tag v0.1.0 && git push --tags
+   ```
+
+4. Confirm the tag workflow's test and build jobs pass and the `pypi` environment publishes the artifact. A manual `workflow_dispatch` run is a dry run: it validates and builds but does not publish.
 
 ## License
 
