@@ -67,7 +67,7 @@ python -m build
 twine check dist/*
 ```
 
-The [GitHub Actions workflow](./.github/workflows/ci.yml) runs the deterministic 100-case, user-style adversarial request suite as a dedicated step, then runs the full regression suite with coverage reporting, Ruff, mypy, and dependency auditing. The full-suite run also includes the adversarial cases. The [PyPI publishing workflow](./.github/workflows/publish-pypi.yml) runs tests and builds on manual dispatch but skips publishing; pushing a `v*.*.*` tag triggers the trusted OIDC publish job. The reference-environment benchmark and full release coverage gate are separate release checks.
+The [GitHub Actions workflow](./.github/workflows/ci.yml) runs the deterministic 100-case, user-style adversarial request suite as a dedicated step, then runs the full regression suite with coverage reporting, Ruff, mypy, and dependency auditing. The full-suite run also includes the adversarial cases. The [security workflow](./.github/workflows/security.yml) adds full-history secret scanning, strict dependency/license checks, CodeQL, Bandit, and zero-leakage regressions on pushes, pull requests, and a weekly schedule. Local hooks are available with `python -m pip install -e ".[dev,security]"`, followed by `pre-commit install`; see [.pre-commit-config.yaml](./.pre-commit-config.yaml) and the [security policy](./SECURITY.md). The [PyPI publishing workflow](./.github/workflows/publish-pypi.yml) runs tests and builds on manual dispatch but skips publishing; pushing a `v*.*.*` tag triggers the trusted OIDC publish job only after security checks pass. The reference-environment benchmark and full release coverage gate are separate release checks.
 
 ## Configuration
 

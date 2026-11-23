@@ -314,7 +314,8 @@ def _negative_prompt(
 
 def generate_dataset(seed: int = DATASET_SEED) -> tuple[BenchmarkSample, ...]:
     """Generate the frozen 800-positive/200-hard-negative synthetic benchmark."""
-    rng = random.Random(seed)
+    # The fixed-seed PRNG generates only the synthetic benchmark corpus.
+    rng = random.Random(seed)  # nosec B311
     cells = tuple(
         (country, scenario)
         for country in sorted(_ENTITY_BY_COUNTRY)

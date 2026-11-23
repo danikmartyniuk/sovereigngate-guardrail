@@ -1,0 +1,129 @@
+name: Security
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*.*.*"]
+  pull_request:
+  schedule:
+    - cron: "17 4 * * 1"
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  secret-scan:
+    name: Secret scan (full history)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Scan repository history with Gitleaks
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_ENABLE_COMMENTS: "false"
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "false"
+
+  dependency-audit:
+    name: Dependency and license audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install package with all runtime extras and audit tools
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[all,dev,test,typecheck,security,benchmark]"
+      - name: Audit installed dependencies for known vulnerabilities
+        run: pip-audit --strict --skip-editable
+      - name: Audit runtime distribution licenses
+        run: |
+          python -m venv "$RUNNER_TEMP/runtime-license-env"
+          "$RUNNER_TEMP/runtime-license-env/bin/python" -m pip install --upgrade pip
+          "$RUNNER_TEMP/runtime-license-env/bin/python" -m pip install -e ".[all]" "pip-licenses>=5.0.0"
+          "$RUNNER_TEMP/runtime-license-env/bin/pip-licenses" --format=json > "$RUNNER_TEMP/runtime-licenses.json"
+          "$RUNNER_TEMP/runtime-license-env/bin/python" - "$RUNNER_TEMP/runtime-licenses.json" <<'PY'
+          import json
+          import re
+          import sys
+
+          with open(sys.argv[1], encoding="utf-8") as license_file:
+              licenses = json.load(license_file)
+          blocked = []
+          review = []
+          for package in licenses:
+              license_name = str(package.get("License") or "").strip()
+              normalized = license_name.upper()
+              options = [
+                  part.strip() for part in re.split(r";|\bOR\b", normalized) if part.strip()
+              ]
+              is_gpl_only = bool(options) and all(
+                  option.startswith(("GPL", "AGPL"))
+                  or "GNU GENERAL PUBLIC LICENSE" in option
+                  or "GNU AFFERO GENERAL PUBLIC LICENSE" in option
+                  for option in options
+              )
+              if is_gpl_only:
+                  blocked.append(f"{package.get('Name', 'unknown')}: {license_name}")
+              if "LGPL" in normalized or "GNU LESSER GENERAL PUBLIC LICENSE" in normalized:
+                  review.append(f"{package.get('Name', 'unknown')}: {license_name}")
+          if blocked:
+              print("GPL/AGPL-only dependencies are not permitted:", file=sys.stderr)
+              print("\n".join(blocked), file=sys.stderr)
+              raise SystemExit(1)
+          print(f"Checked {len(licenses)} runtime distributions; no GPL/AGPL-only licenses found.")
+          if review:
+              print("Copyleft licenses needing separate compatibility review:")
+              print("\n".join(review))
+          PY
+
+  static-security-analysis:
+    name: SAST and security lint
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: github/codeql-action/init@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
+        with:
+          languages: python
+          queries: security-extended
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install static security tools
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev,security]"
+      - name: Run Ruff security and correctness rules
+        run: ruff check --select S,B,ASYNC,UP,I,E,F src tests
+      - name: Run Bandit
+        run: bandit -r src/ -ll
+      - uses: github/codeql-action/analyze@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
+        with:
+          category: "/language:python"
+
+  pii-leak-regression:
+    name: Zero-leakage regression
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install package and regression dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev,test,litellm,ner]"
+      - name: Verify synthetic EU identifiers never leak
+        run: pytest -v tests/test_zero_leakage.py

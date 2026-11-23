@@ -42,10 +42,20 @@ dev = [
     "mypy>=1.11",
     "build>=1.2",
     "twine>=5.1",
+    "pre-commit>=4.0",
+    "pre-commit>=4.0",
 ]
-test = ["onnx>=1.16.0", "pytest-cov>=5.0.0"]
+test = [
+    "onnx>=1.16.0",
+    "pytest-cov>=5.0.0",
+    "structlog>=24.4.0",
+]
 typecheck = ["types-PyYAML>=6.0.0"]
-security = ["pip-audit>=2.7.0"]
+security = [
+    "bandit>=1.9.4",
+    "pip-audit>=2.7.0",
+    "pip-licenses>=5.0.0",
+]
 benchmark = ["presidio-analyzer==2.2.366"]
 
 [project.scripts]
@@ -105,6 +115,16 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["B", "E", "F", "I", "UP"]
+
+[tool.ruff.lint.per-file-ignores]
+"src/sovereigngate/benchmark.py" = ["S311"] # Fixed-seed PRNG is only for synthetic benchmark data.
+"src/sovereigngate/engine/ner_onnx.py" = ["S105"] # [ENT] and [SEP] are model tokens, not passwords.
+"tests/*.py" = ["S101"] # Assertions are the pytest test API.
+"tests/test_ner_onnx.py" = ["S106"] # [UNK] is a tokenizer control token, not a credential.
+"tests/test_normalizer.py" = ["S311"] # Deterministic random data exercises decoding only.
+"tests/test_pipeline.py" = ["S311"] # Deterministic random data exercises bounded decoding only.
+"tests/test_security_leaks.py" = ["S311"] # Deterministic random noise is synthetic test input.
+"tests/test_vault_and_stream.py" = ["S105"] # [PERSON_...] is a pseudonym fixture, not a password.
 
 [tool.mypy]
 python_version = "3.12"
