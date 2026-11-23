@@ -58,17 +58,17 @@ The planned default is `shadow`. `on_error` is intended to support `fail_closed`
 
 ## Performance and evaluation targets
 
-The specification sets release targets for a reproducible synthetic 1,000-prompt benchmark, including 20% hard negatives:
+The benchmark protocol uses 1,000 generated prompts (`eu-synthetic-v1`, fixed seed `20261123`) across DE, ES, FR, IT, NL, and PL support, HR, and finance scenarios; 800 contain positive synthetic examples and 200 are hard negatives. The baseline is pinned to [Presidio Analyzer 2.2.366](https://pypi.org/project/presidio-analyzer/2.2.366/).
 
 | Measure | Target |
 | --- | ---: |
-| Structured EU identifier recall | At least 99.0% |
+| Structured identifier recall on benchmarked countries | At least 99.0% |
 | False positive rate on hard negatives | At most 1.0% |
-| Downstream task utility parity | At least 95.0% |
+| Offline non-PII task-utility retention proxy | At least 95.0% |
 | Tier 1 latency, p95 on a 4-vCPU reference VM | Under 2.0 ms |
 | Optional Tier 2 CPU NER latency, p95 | Under 65.0 ms |
 
-These are targets to measure, not results already achieved. Benchmark reports should include the dataset generation method, environment, and pinned Microsoft Presidio baseline version; a comparison must not promise to beat the baseline on every metric.
+The utility figure is a deterministic proxy: compare whether a task answer derived from non-sensitive prompt context remains unchanged after masking. It is not an LLM quality score. These are targets to measure, not results already achieved. Benchmark reports should include the generated dataset annotations, environment, and baseline configuration; comparisons must not promise to beat Presidio on every metric. See the [benchmark protocol](./docs/ARCHITECTURE.md#t04--benchmark-protocol-resolved).
 
 ## Planned interface and configuration
 

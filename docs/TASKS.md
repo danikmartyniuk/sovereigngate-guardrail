@@ -4,12 +4,14 @@ This is the ordered implementation backlog derived from the product requirements
 
 SovereignGate provides **configurable data-minimization and technical safeguard controls (supporting GDPR Art. 5(1)(c) & Art. 32)**; it does not certify compliance.
 
-## Phase 0 — Resolve pilot-critical decisions
+## Phase 0 — Product decisions
+
+The four Phase 0 decisions are recorded below. T01's cross-request token-collision risk remains an explicit external-pilot gate; completing the decision does not accept that risk on behalf of an operator.
 
 - [x] **T01 — Resolve token collision and lifecycle policy.** Keep the mandated six-hex format; detect different canonical values mapping to the same token within a request vault and fail closed in enforce mode before provider dispatch, never overwriting. One vault belongs to a logical LiteLLM request and is shared across its retries/stream; clear it on every terminal path. Restore tool arguments only for allowlisted internal tools and assistant text only on explicitly trusted routes; otherwise leave placeholders. The unpreventable cross-request collision risk is a documented pilot gate requiring written owner acceptance. See [T01 decision](./ARCHITECTURE.md#t01--token-collision-and-request-lifecycle-resolved).
 - [x] **T02 — Define audit writer failure policy.** Use a bounded 10,000-record queue and non-blocking pre-dispatch admission. On saturation/writer failure, shadow records degraded health and continues; enforce follows `on_error` (fail-closed rejects before dispatch, explicit fail-open proceeds with a sanitized loss signal). Writer failure after dispatch is counted; shutdown drains for 10 seconds then fails visibly. See [T02 decision](./ARCHITECTURE.md#t02--audit-queue-and-writer-failure-policy-resolved).
 - [x] **T03 — Fix supported identifier and NER artifact matrix.** Baseline validator is `python-stdnum==2.2`: explicit modules cover 23 EU member states; CY, LV, LU, and MT have no personal-ID module in this baseline and are not claimed supported. Select Apache-2.0 `urchade/gliner_multi-v2.1`, pin its model revision and source-weight SHA-256, export/quantize offline, and verify the generated ONNX digest from a local manifest. See [T03 decision](./ARCHITECTURE.md#t03--identifier-matrix-and-local-ner-artifact-resolved).
-- [ ] **T04 — Freeze measurable benchmark protocol.** Fix dataset seed and generation rules, ground truth, task-utility scoring, Presidio version, and reference 4-vCPU environment. Separate absolute NFR thresholds from baseline comparisons.
+- [x] **T04 — Freeze measurable benchmark protocol.** Fix `eu-synthetic-v1` (seed `20261123`, 1,000 samples, 800 positives/200 hard negatives), stratification, span annotations, and a non-PII task-utility proxy. Pin Presidio Analyzer `2.2.366` and a Linux x86_64/CPython 3.12.16, 4-vCPU/8-GiB reference; use 100 warm-ups and 10,000 timed runs. Keep absolute thresholds separate from baseline results. See [T04 decision](./ARCHITECTURE.md#t04--benchmark-protocol-resolved).
 
 ## Phase 1 — Package, policy, and local processing
 
@@ -41,7 +43,7 @@ SovereignGate provides **configurable data-minimization and technical safeguard 
   - Depends on: T02, T05, T06, T12.
 - [ ] **T15 — Implement offline CLI and evidence exporter.** Provide `verify-log`, `export-dpia` (Markdown/JSON), and `dry-run`; generate reports from sanitized policy/audit metadata only and use bounded regulatory terminology. Return non-zero on verification/configuration failures.
   - Depends on: T06, T10, T14.
-- [ ] **T16 — Implement reproducible synthetic benchmark.** Generate the specified 1,000-prompt dataset with 20% hard negatives, compare with pinned Presidio, report recall/FPR/utility and latency, and enforce the absolute NFR-1 release thresholds. Avoid real personal data in fixtures and outputs.
+- [ ] **T16 — Implement reproducible synthetic benchmark.** Generate `eu-synthetic-v1` exactly per T04 (seed, 800/200 split, 18 strata, annotated original offsets); compare with Presidio Analyzer `2.2.366`, report recall/FPR and per-country/entity results, the non-PII utility proxy, and Tier 1/Tier 2 p95. Enforce the absolute thresholds on the T04 reference VM; provision all models before the offline run.
   - Depends on: T04, T08, T10.
 - [ ] **T17 — Add LiteLLM pilot deployment and end-to-end tests.** Provide sample LiteLLM config and slim local Docker Compose stack; verify shadow/enforce, streaming, tool calls, startup failure behavior, offline NER provisioning, shutdown flush, and no raw-PII logs end to end.
   - Depends on: T12, T13, T14, T15.
