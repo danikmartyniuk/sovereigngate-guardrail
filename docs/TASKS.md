@@ -17,7 +17,7 @@ The four Phase 0 decisions are recorded below. T01's cross-request token-collisi
 
 - [x] **T05 — Create package and quality baseline.** Added the `src/sovereigngate/` package and `pyproject.toml` for Python `>=3.12` with runtime/optional/dev extras, pytest/ruff/mypy configuration, CI quality workflow, and a `--version` CLI/import smoke test. CI tests do not download model artifacts or make request-path network calls.
   - Depends on: T01, T02, T03, T04.
-- [ ] **T06 — Implement strict configuration and default policy.** Add frozen Pydantic v2 schemas, YAML/environment loading, `shadow` default, entity actions/sensitivity, `on_error`, secret validation, and a reviewed `rules/eu_default_v1.yaml`. Reject unknown or invalid settings explicitly.
+- [x] **T06 — Implement strict configuration and default policy.** Added frozen Pydantic v2 schemas with forbidden extra fields, safe YAML/environment-path loading, per-entity actions/sensitivity, `shadow`/`fail_closed` defaults, normalization and optional NER settings, plus a default policy pack. HMAC secrets are decoded/validated as at least 32 bytes; only explicit development mode may create an ephemeral key, with a sanitized warning. Unknown and malformed settings fail with field-only diagnostics. See [`config.py`](../src/sovereigngate/config.py) and [`eu_default_v1.yaml`](../rules/eu_default_v1.yaml).
   - Depends on: T05.
 - [ ] **T07 — Implement normalization and offset mapping.** Add NFKC, specified zero-width removal, separator-obfuscation handling, original-index span mapping, and bounded high-entropy/encoded-content handling. Define clear failure results that let enforce mode fail closed.
   - Depends on: T06.

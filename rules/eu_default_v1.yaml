@@ -1,0 +1,56 @@
+mode: shadow
+on_error: fail_closed
+
+normalization:
+  strip_zero_width: true
+  collapse_separator_obfuscation: true
+  entropy_min_length: 48
+  entropy_threshold: 4.5
+  max_encoded_length: 4096
+  encoded_content_action: block
+
+ner:
+  enabled: false
+  languages: [de, fr, es, pl, it, nl, en]
+
+entities:
+  AT_VNR: {enabled: true, action: mask, sensitivity: standard}
+  BE_NISS: {enabled: true, action: mask, sensitivity: standard}
+  BG_EGN: {enabled: true, action: mask, sensitivity: standard}
+  BG_PNF: {enabled: true, action: mask, sensitivity: standard}
+  HR_OIB: {enabled: true, action: mask, sensitivity: standard}
+  CZ_RC: {enabled: true, action: mask, sensitivity: standard}
+  DK_CPR: {enabled: true, action: mask, sensitivity: standard}
+  EE_IK: {enabled: true, action: mask, sensitivity: standard}
+  FI_HETU: {enabled: true, action: mask, sensitivity: standard}
+  FR_NIR: {enabled: true, action: mask, sensitivity: standard}
+  DE_STEUERID: {enabled: true, action: mask, sensitivity: standard}
+  GR_AMKA: {enabled: true, action: mask, sensitivity: special_category}
+  HU_ANUM: {enabled: true, action: mask, sensitivity: standard}
+  IE_PPSN: {enabled: true, action: mask, sensitivity: standard}
+  IT_CODICE_FISCALE: {enabled: true, action: mask, sensitivity: standard}
+  LT_ASMENS: {enabled: true, action: mask, sensitivity: standard}
+  NL_BSN: {enabled: true, action: mask, sensitivity: standard}
+  PL_PESEL: {enabled: true, action: mask, sensitivity: standard}
+  PL_NIP: {enabled: true, action: mask, sensitivity: standard}
+  PT_CC: {enabled: true, action: mask, sensitivity: standard}
+  PT_NIF: {enabled: true, action: mask, sensitivity: standard}
+  RO_CNP: {enabled: true, action: mask, sensitivity: standard}
+  SK_RC: {enabled: true, action: mask, sensitivity: standard}
+  SI_EMSO: {enabled: true, action: mask, sensitivity: standard}
+  ES_DNI: {enabled: true, action: mask, sensitivity: standard}
+  ES_NIE: {enabled: true, action: mask, sensitivity: standard}
+  ES_NIF: {enabled: true, action: mask, sensitivity: standard}
+  SE_PERSONNUMMER: {enabled: true, action: mask, sensitivity: standard}
+  IBAN: {enabled: true, action: mask, sensitivity: standard}
+  PAYMENT_CARD: {enabled: true, action: mask, sensitivity: standard}
+  BIC: {enabled: true, action: mask, sensitivity: standard}
+  EMAIL: {enabled: true, action: mask, sensitivity: standard}
+  PHONE: {enabled: true, action: mask, sensitivity: standard}
+  IP_ADDRESS: {enabled: true, action: mask, sensitivity: standard}
+  API_KEY: {enabled: true, action: mask, sensitivity: standard}
+  BEARER_TOKEN: {enabled: true, action: mask, sensitivity: standard}
+  PERSON: {enabled: true, action: mask, sensitivity: standard}
+  ORG: {enabled: true, action: mask, sensitivity: standard}
+  ADDRESS: {enabled: true, action: mask, sensitivity: standard}
+  HEALTH_TERM: {enabled: true, action: mask, sensitivity: special_category}
