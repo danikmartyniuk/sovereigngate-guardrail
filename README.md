@@ -6,7 +6,7 @@ SovereignGate is an open-source Python library and LiteLLM custom guardrail for 
 
 SovereignGate provides **configurable data-minimization and technical safeguard controls (supporting GDPR Art. 5(1)(c) & Art. 32)**. It is not a compliance product or legal advice.
 
-> **Project status:** Implementation is underway. The installable Python package, policy loader, normalizer, Tier 1 detectors, local ONNX NER runner, span/policy decision pipeline, HMAC vault, bounded streaming placeholder buffer, LiteLLM lifecycle adapter, SQLite WAL audit writer/verifier, and zero-leak regressions are implemented. The adapter copies and masks supported request text, restores only at configured trusted boundaries, enqueues PII-free pre-call records, and wipes request vaults on terminal paths. Functional CLI commands, the reproducible benchmark, and pilot deployment remain in progress. NER weights are not bundled, and language support is not claimed until benchmarked. See the [V1 task plan](./docs/TASKS.md) for implementation status.
+> **Project status:** Implementation is underway. The installable Python package, policy loader, normalizer, Tier 1 detectors, local ONNX NER runner, span/policy decision pipeline, HMAC vault, bounded streaming placeholder buffer, LiteLLM lifecycle adapter, SQLite WAL audit writer/verifier, offline `verify-log`/`export-dpia`/`dry-run` commands, and zero-leak regressions are implemented. The adapter copies and masks supported request text, restores only at configured trusted boundaries, enqueues PII-free pre-call records, and wipes request vaults on terminal paths. The reproducible benchmark and pilot deployment remain in progress. NER weights are not bundled, and language support is not claimed until benchmarked. See the [V1 task plan](./docs/TASKS.md) for implementation status.
 
 ## Why it exists
 
@@ -23,7 +23,7 @@ SovereignGate is designed to run inside the customer's existing LiteLLM deployme
 - **Pseudonymize consistently within a session.** Use HMAC-derived placeholders such as `[PL_PESEL_9F2A1C]` so repeated canonical values in the same session can map to the same token. The lookup needed to restore a value is kept only in a request-scoped in-memory vault.
 - **Integrate with LiteLLM request/response paths.** Inspect supported message text, tool-call argument JSON, and tool outputs; handle streaming placeholders split across chunks; attach non-PII entity/routing metadata; and apply configured actions.
 - **Support observe-first operation.** `shadow` mode is intended to report findings without changing or blocking a request. `enforce` mode is intended to apply per-entity `mask`, `block`, `shadow_log`, or `allow` policy actions.
-- **Create local evidence.** A background writer persists sanitized event metadata in a local SQLite hash chain. The `verify-log`, `dry-run`, and `export-dpia` commands are still being implemented.
+- **Create local evidence.** A background writer persists sanitized event metadata in a local SQLite hash chain. The `verify-log`, `dry-run`, and `export-dpia` commands verify, evaluate, and export sanitized evidence offline.
 
 ## How a request is intended to flow
 
@@ -76,18 +76,18 @@ The benchmark protocol uses 1,000 generated prompts (`eu-synthetic-v1`, fixed se
 
 The utility figure is a deterministic proxy: compare whether a task answer derived from non-sensitive prompt context remains unchanged after masking. It is not an LLM quality score. These are targets to measure, not results already achieved. Benchmark reports should include the generated dataset annotations, environment, and baseline configuration; comparisons must not promise to beat Presidio on every metric. See the [benchmark protocol](./docs/ARCHITECTURE.md#t04--benchmark-protocol-resolved).
 
-## Planned interface and configuration
+## CLI interface and configuration
 
 The implementation plan includes a Python `>=3.12` package, a Pydantic v2 YAML/environment policy loader, and a `sovereigngate` CLI. Planned environment settings include `SOVEREIGNGATE_POLICY_PATH` and `SOVEREIGNGATE_HMAC_SECRET`. Production deployments should provision a stable secret of at least 32 bytes rather than rely on a development-only ephemeral key.
 
-Planned CLI commands:
+Implemented offline commands:
 
 - `sovereigngate verify-log --db audit.db` — verify the local SQLite hash chain and return a failing exit status on integrity errors.
 - `sovereigngate export-dpia --from YYYY-MM-DD --to YYYY-MM-DD --format md|json` — export a report of configured controls and sanitized audit aggregates.
 - `sovereigngate dry-run --file sample_prompts.jsonl` — evaluate local sample input against a policy without calling a model provider.
 - `sovereigngate benchmark` — run the synthetic benchmark and report measured accuracy and latency.
 
-The listed functional commands are part of the target design and are not available yet; only `sovereigngate --version` is implemented. For architecture boundaries and remaining decisions, read the [architecture](./docs/ARCHITECTURE.md); for implementation ordering and acceptance criteria, read the [task plan](./docs/TASKS.md).
+The `benchmark` command and reference-environment benchmark run remain release work. The implemented commands above run locally and do not call model providers. For architecture boundaries and remaining decisions, read the [architecture](./docs/ARCHITECTURE.md); for implementation ordering and acceptance criteria, read the [task plan](./docs/TASKS.md).
 
 ## Out of scope for V1
 

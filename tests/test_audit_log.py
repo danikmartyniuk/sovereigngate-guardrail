@@ -33,6 +33,7 @@ def _event(index: int, *, mode: OperatingMode = OperatingMode.ENFORCE) -> AuditE
         actor_id=f"{index:032x}",
         mode=mode,
         model_target="local/test-model",
+        eu_sensitive=True,
         policy_sha256=_POLICY_HASH,
         entities_detected={"PL_PESEL": index + 1},
         action_taken=AuditAction.MASKED,

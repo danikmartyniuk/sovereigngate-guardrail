@@ -553,6 +553,7 @@ class SovereignGateGuardrail(CustomGuardrail):
             request_id=request_id,
             mode=self.policy.mode,
             model_target=model_target,
+            eu_sensitive=summary.eu_sensitive,
             policy_sha256=self._policy_sha256,
             entities_detected=summary.entity_counts,
             action_taken=action_taken,

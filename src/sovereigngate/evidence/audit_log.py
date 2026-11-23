@@ -85,6 +85,7 @@ class AuditEvent(BaseModel):
     actor_id: ActorId | None = None
     mode: OperatingMode
     model_target: ModelTarget | None = None
+    eu_sensitive: bool = False
     policy_sha256: Digest
     entities_detected: dict[EntityName, EntityCount] = Field(default_factory=dict, max_length=64)
     action_taken: AuditAction
