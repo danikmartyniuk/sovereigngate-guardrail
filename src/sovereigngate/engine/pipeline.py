@@ -189,10 +189,13 @@ def run_pipeline(
     ner_runner: NERDetector | None = None,
 ) -> PipelineResult:
     """Normalize, detect, resolve spans, and return policy decisions without mutating text."""
+    normalized: NormalizedText | None = None
+    normalization_failed = False
     try:
         normalized = normalize_text(text, policy.normalization)
     except Exception:
-        # Parser and normalization errors may include the source string in their detail.
+        normalization_failed = True
+    if normalization_failed or normalized is None:
         return _failure_result(policy, PipelineErrorCode.NORMALIZATION_FAILURE)
 
     signals = normalized.encoded_content
@@ -219,9 +222,13 @@ def run_pipeline(
                     PipelineErrorCode.ENCODED_SCAN_UNAVAILABLE,
                     signals,
                 )
+            decoded: NormalizedText | None = None
+            decode_failed = False
             try:
                 decoded = normalize_text(signal.decoded_text, one_pass_settings)
             except Exception:
+                decode_failed = True
+            if decode_failed or decoded is None:
                 return _failure_result(
                     policy,
                     PipelineErrorCode.ENCODED_SCAN_UNAVAILABLE,

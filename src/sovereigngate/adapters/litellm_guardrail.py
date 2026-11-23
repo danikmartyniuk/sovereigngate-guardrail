@@ -97,6 +97,7 @@ class SovereignGateGuardrail(CustomGuardrail):
         context_id, context = self._get_or_create_context(working, metadata)
         metadata[_CONTEXT_METADATA_KEY] = context_id
         summary = _ScanSummary()
+        failure: GuardrailRaisedException | None = None
 
         try:
             messages = working.get("messages")
@@ -118,27 +119,31 @@ class SovereignGateGuardrail(CustomGuardrail):
             return working
         except _AdapterBlock as error:
             self._release_context(context_id)
-            raise self._block_exception(error.safe_message, blocked_content=True) from None
+            failure = self._block_exception(error.safe_message, blocked_content=True)
         except VaultCollisionError:
             self._release_context(context_id)
-            raise self._block_exception(
+            failure = self._block_exception(
                 "SovereignGate blocked a request after an in-request token collision",
                 blocked_content=True,
-            ) from None
+            )
         except Exception as error:
             code = error.code if isinstance(error, _AdapterFailure) else "processing_failure"
             self._release_context(context_id)
             if self._fails_closed:
-                raise self._block_exception(
+                failure = self._block_exception(
                     "SovereignGate could not safely process the request", blocked_content=False
-                ) from None
-            fallback_key, fallback_metadata = self._metadata_bucket(original)
-            fallback_metadata[_CONTEXT_METADATA_KEY] = context_id
-            fallback_metadata["eu_sensitive"] = summary.eu_sensitive
-            fallback_metadata["detected_entity_types"] = sorted(summary.detected_entity_types)
-            fallback_metadata["sovereigngate_processing_error"] = code
-            original[fallback_key] = fallback_metadata
-            return original
+                )
+            else:
+                fallback_key, fallback_metadata = self._metadata_bucket(original)
+                fallback_metadata[_CONTEXT_METADATA_KEY] = context_id
+                fallback_metadata["eu_sensitive"] = summary.eu_sensitive
+                fallback_metadata["detected_entity_types"] = sorted(summary.detected_entity_types)
+                fallback_metadata["sovereigngate_processing_error"] = code
+                original[fallback_key] = fallback_metadata
+                return original
+        if failure is not None:
+            raise failure
+        return working
 
     async def async_post_call_success_hook(
         self,
@@ -151,19 +156,24 @@ class SovereignGateGuardrail(CustomGuardrail):
         context = self._get_context(context_id)
         if context is None:
             return response
+        result = response
+        failure: GuardrailRaisedException | None = None
         try:
-            return self._rehydrate_response(response, context)
+            result = self._rehydrate_response(response, context)
         except Exception:
             if self._fails_closed:
-                raise self._block_exception(
+                failure = self._block_exception(
                     "SovereignGate could not safely process the response",
                     blocked_content=False,
                     status_code=502,
-                ) from None
-            self._mark_processing_error(data, "response_processing_failure")
-            return response
+                )
+            else:
+                self._mark_processing_error(data, "response_processing_failure")
         finally:
             self._release_context(context_id)
+        if failure is not None:
+            raise failure
+        return result
 
     async def async_post_call_failure_hook(
         self,
@@ -184,6 +194,7 @@ class SovereignGateGuardrail(CustomGuardrail):
         del user_api_key_dict
         context_id = self._context_id(request_data)
         context = self._get_context(context_id)
+        failure: GuardrailRaisedException | None = None
         try:
             async for chunk in response:
                 if context is None:
@@ -193,24 +204,25 @@ class SovereignGateGuardrail(CustomGuardrail):
                     transformed = self._transform_stream_chunk(chunk, context)
                 except Exception:
                     if self._fails_closed:
-                        raise _AdapterFailure("stream_processing_failure") from None
+                        failure = self._block_exception(
+                            "SovereignGate could not safely process a streamed response",
+                            blocked_content=False,
+                            status_code=502,
+                        )
+                        break
                     self._mark_processing_error(request_data, "stream_processing_failure")
                     transformed = copy.deepcopy(chunk)
                 yield transformed
-        except _AdapterFailure:
-            raise self._block_exception(
-                "SovereignGate could not safely process a streamed response",
-                blocked_content=False,
-                status_code=502,
-            ) from None
         except Exception:
-            raise self._block_exception(
+            failure = self._block_exception(
                 "SovereignGate stream processing failed",
                 blocked_content=False,
                 status_code=502,
-            ) from None
+            )
         finally:
             self._release_context(context_id)
+        if failure is not None:
+            raise failure
 
     @property
     def _fails_closed(self) -> bool:
@@ -383,14 +395,17 @@ class SovereignGateGuardrail(CustomGuardrail):
         summary: _ScanSummary,
     ) -> object:
         parsed = arguments
+        parse_failed = False
         if isinstance(arguments, str):
             try:
                 parsed = json.loads(arguments)
             except (json.JSONDecodeError, TypeError):
-                if self.policy.mode is OperatingMode.SHADOW:
-                    self._mask_text(arguments, context, summary)
-                    return arguments
-                raise _AdapterFailure("malformed_tool_arguments") from None
+                parse_failed = True
+        if parse_failed:
+            if self.policy.mode is OperatingMode.SHADOW and isinstance(arguments, str):
+                self._mask_text(arguments, context, summary)
+                return arguments
+            raise _AdapterFailure("malformed_tool_arguments")
 
         transformed = self._transform_json_values(parsed, context, summary)
         if self.policy.mode is OperatingMode.SHADOW:
@@ -422,10 +437,16 @@ class SovereignGateGuardrail(CustomGuardrail):
         context: _RequestContext,
         summary: _ScanSummary,
     ) -> str:
+        result: PipelineResult | None = None
+        failure_code: str | None = None
         try:
             result = run_pipeline(text, self.policy, self._ner_runner)
         except PipelineError as error:
-            raise _AdapterFailure(error.code.value) from None
+            failure_code = error.code.value
+        if failure_code is not None:
+            raise _AdapterFailure(failure_code)
+        if result is None:
+            raise _AdapterFailure("processing_failure")
         summary.detected_entity_types.update(result.detected_entity_types)
         summary.eu_sensitive = summary.eu_sensitive or result.eu_sensitive
         if result.processing_error is not None:
@@ -561,11 +582,14 @@ class SovereignGateGuardrail(CustomGuardrail):
 
     def _rehydrate_tool_arguments(self, value: object, context: _RequestContext) -> object:
         parsed = value
+        parse_failed = False
         if isinstance(value, str):
             try:
                 parsed = json.loads(value)
             except (json.JSONDecodeError, TypeError):
-                raise _AdapterFailure("malformed_tool_arguments") from None
+                parse_failed = True
+        if parse_failed:
+            raise _AdapterFailure("malformed_tool_arguments")
         restored = self._rehydrate_json_values(parsed, context)
         if isinstance(value, str):
             return json.dumps(restored, ensure_ascii=False, separators=(",", ":"))
