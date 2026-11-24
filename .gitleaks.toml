@@ -1,0 +1,14 @@
+title = "SovereignGate Gitleaks configuration"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "generic-api-key"
+
+  [[rules.allowlists]]
+  description = "Synthetic session IDs in the vault tests are not credentials."
+  condition = "AND"
+  regexTarget = "secret"
+  regexes = ['''^conversation-[12]$''']
+  paths = ['''^tests/test_vault_and_stream\.py$''']

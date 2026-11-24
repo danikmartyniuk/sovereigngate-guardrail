@@ -43,7 +43,6 @@ dev = [
     "build>=1.2",
     "twine>=5.1",
     "pre-commit>=4.0",
-    "pre-commit>=4.0",
 ]
 test = [
     "onnx>=1.16.0",
@@ -75,13 +74,9 @@ fallback_version = "0.0.0"
 version_scheme = "guess-next-dev"
 local_scheme = "no-local-version"
 
-[tool.hatch.build.hooks.vcs]
-version-file = "src/sovereigngate/_version.py"
-
 [tool.hatch.build.targets.wheel]
 packages = ["src/sovereigngate"]
 artifacts = [
-    "src/sovereigngate/_version.py",
     "src/sovereigngate/**/*.json",
     "src/sovereigngate/**/*.yaml",
 ]
@@ -91,7 +86,6 @@ artifacts = [
 
 [tool.hatch.build.targets.sdist]
 artifacts = [
-    "src/sovereigngate/_version.py",
     "src/sovereigngate/**/*.json",
     "src/sovereigngate/**/*.yaml",
 ]

@@ -1,7 +1,12 @@
-try:
-    from ._version import __version__ as _vcs_version
-except ImportError:
-    _vcs_version = "0+unknown"
+from importlib.metadata import PackageNotFoundError, version
 
-__version__: str = _vcs_version
+
+def _resolve_version() -> str:
+    try:
+        return version("sovereigngate-guardrail")
+    except PackageNotFoundError:
+        return "0.1.0"
+
+
+__version__: str = _resolve_version()
 __all__ = ["__version__"]
