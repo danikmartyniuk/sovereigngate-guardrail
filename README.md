@@ -6,6 +6,10 @@ SovereignGate is an open-source Python library and LiteLLM custom guardrail for 
 
 SovereignGate provides **configurable data-minimization and technical safeguard controls (supporting GDPR Art. 5(1)(c) & Art. 32)**. It is not a compliance product or legal advice.
 
+See the standalone [Technical Guide](./docs/TECHNICAL_GUIDE.md) for detailed setup, policy, LiteLLM lifecycle, audit, CLI, and operations documentation.
+
+For in-depth setup, policy, LiteLLM lifecycle, API, CLI, audit, NER, and deployment instructions, see the [Technical Guide](./docs/TECHNICAL_GUIDE.md).
+
 > **Project status:** Version `0.1.0` is published on [PyPI](https://pypi.org/project/sovereigngate-guardrail/). The package includes the policy loader, normalizer, Tier 1 detectors, local ONNX NER runner, span/policy decision pipeline, HMAC vault, bounded streaming placeholder buffer, LiteLLM lifecycle adapter, SQLite WAL audit writer/verifier, offline CLI, synthetic benchmark harness, and security regressions. The reference-environment benchmark and live pilot deployment remain unverified. NER weights are not bundled, and language support is not claimed until benchmarked. See the [V1 task plan](./docs/TASKS.md) for remaining gates.
 
 ## Why it exists
