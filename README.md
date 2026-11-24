@@ -6,7 +6,7 @@ SovereignGate is an open-source Python library and LiteLLM custom guardrail for 
 
 SovereignGate provides **configurable data-minimization and technical safeguard controls (supporting GDPR Art. 5(1)(c) & Art. 32)**. It is not a compliance product or legal advice.
 
-> **Project status:** Implementation is underway. The installable Python package, policy loader, normalizer, Tier 1 detectors, local ONNX NER runner, span/policy decision pipeline, HMAC vault, bounded streaming placeholder buffer, LiteLLM lifecycle adapter, SQLite WAL audit writer/verifier, offline CLI, synthetic benchmark harness, and zero-leak regressions are implemented. The reference-environment benchmark and live pilot deployment remain unverified. NER weights are not bundled, and language support is not claimed until benchmarked. See the [V1 task plan](./docs/TASKS.md) for current gates.
+> **Project status:** Version `0.1.0` is published on [PyPI](https://pypi.org/project/sovereigngate-guardrail/). The package includes the policy loader, normalizer, Tier 1 detectors, local ONNX NER runner, span/policy decision pipeline, HMAC vault, bounded streaming placeholder buffer, LiteLLM lifecycle adapter, SQLite WAL audit writer/verifier, offline CLI, synthetic benchmark harness, and security regressions. The reference-environment benchmark and live pilot deployment remain unverified. NER weights are not bundled, and language support is not claimed until benchmarked. See the [V1 task plan](./docs/TASKS.md) for remaining gates.
 
 ## Why it exists
 
@@ -20,7 +20,7 @@ Use Python 3.12 or newer.
 
 ### Install from PyPI
 
-The first PyPI release has not been published yet. After a tagged release is available, install the base package or the optional integrations you need:
+Version `0.1.0` is available. Install the base package or the optional integrations you need:
 
 ```bash
 pip install sovereigngate-guardrail
@@ -30,9 +30,9 @@ pip install "sovereigngate-guardrail[sidecar]"
 
 The `litellm` extra installs the LiteLLM adapter dependency. The `sidecar` extra installs FastAPI and Uvicorn dependencies for optional sidecar integrations; a standalone proxy is not part of V1. The `ner` extra enables the local ONNX runtime but does not download model weights. Install all three optional integration groups with `pip install "sovereigngate-guardrail[all]"`.
 
-### Install from a source checkout
+### Install from a source checkout (development)
 
-Until the first release is published, install from the repository:
+For development or unreleased changes, install an editable checkout:
 
 ```bash
 git clone https://github.com/danikmartyniuk/sovereigngate-guardrail.git
@@ -215,10 +215,10 @@ Compose syntax and custom-guardrail class loading are tested; a live stack run h
 
 1. Configure PyPI Trusted Publishing for this repository, workflow `.github/workflows/publish-pypi.yml`, and GitHub environment `pypi`. No PyPI API token is stored in GitHub secrets.
 2. Confirm the release commit passes CI and verify the distributions locally with `python -m build` and `twine check dist/*`.
-3. Create and push a `vX.Y.Z` tag; the tag is the package version source, so do not edit a version constant in `pyproject.toml`:
+3. Choose the next unused semantic version and create and push its `vX.Y.Z` tag. Version `0.1.0` is already released; never reuse a published version or tag. The tag is the package version source, so do not edit a version constant in `pyproject.toml`. For example, if `0.1.1` is the intended next version:
 
    ```bash
-   git tag v0.1.0 && git push --tags
+   git tag v0.1.1 && git push origin v0.1.1
    ```
 
 4. Confirm the tag workflow's test and build jobs pass and the `pypi` environment publishes the artifact. A manual `workflow_dispatch` run is a dry run: it validates and builds but does not publish.
